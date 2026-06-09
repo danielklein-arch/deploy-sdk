@@ -102,6 +102,20 @@ test('resolveEnv: neznámé stable env → throw', () => {
   expect(() => resolveEnv(topology, { stable: 'staging' })).toThrow('neznámé stálé prostředí')
 })
 
+test('render build worker: main = build output + assets binding', async () => {
+  const fe: WorkerDescriptor = {
+    base: 'frontend',
+    dir: 'apps/frontend',
+    main: 'src/index.ts',
+    build: { command: 'bunx nx build frontend', main: '.output/server/index.mjs', assets: '.output/public' },
+    deployOrder: 2,
+  }
+  const env = resolveEnv(topology, { preview: 3 })
+  const cfg = await read(await renderConfig(fe, opts(env)))
+  expect(cfg.main).toBe('../apps/frontend/.output/server/index.mjs')
+  expect(cfg.assets).toEqual({ directory: '../apps/frontend/.output/public' })
+})
+
 test('lint: sensitive flat var + flat/perEnv kolize; ACCOUNT_ID NEhlásí', () => {
   const lintTopo: Topology = {
     ...topology,

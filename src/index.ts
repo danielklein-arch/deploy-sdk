@@ -13,6 +13,7 @@ export type {
   SecretStoreBinding,
   DurableObjectBinding,
   WorkflowBinding,
+  BuildSpec,
   EnvConfig,
   DeployEnv,
 } from './types'

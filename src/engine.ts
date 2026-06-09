@@ -1,5 +1,6 @@
 // Orchestrace nad topologií — čisté funkce, topology + env + logger injektované. Bez process.env / GH.
 // env (DeployEnv, z resolveEnv) řídí prefix/domény/vars/secrets → stejný engine pro preview i stable.
+import { $ } from 'bun'
 import type { Topology, WorkerDescriptor, DeployEnv } from './types'
 import {
   ensureD1,
@@ -43,6 +44,11 @@ export async function deployOne(
   opts: { ids: Ids; log?: Logger },
 ): Promise<string> {
   const { ids, log = consoleLogger } = opts
+  // Build-before-deploy (Nuxt apod.) — spustí se z consumer root před renderem/deployem.
+  if (w.build) {
+    log.info(`[build] ${w.base}: ${w.build.command}`)
+    await $`sh -c ${w.build.command}`
+  }
   const cfg = await renderConfig(w, {
     env,
     ids,

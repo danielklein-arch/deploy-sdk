@@ -14,11 +14,16 @@ export type R2Binding = { binding: string; resource: string } // resource = base
 export type SecretStoreBinding = { binding: string; secretName: string } // secretName = jméno v CF Secrets Store
 export type DurableObjectBinding = { binding: string; className: string } // className = exportovaná DO třída
 export type WorkflowBinding = { binding: string; name: string; className: string } // name = base, prefix přidán za běhu
+// Build-before-deploy (Nuxt apod.): deploy spustí `command`, pak deployuje built output místo src.
+// main = entry buildu (relativní k worker dir, např. `.output/server/index.mjs`),
+// assets = static dir (relativní k worker dir, např. `.output/public`) → wrangler assets binding.
+export type BuildSpec = { command: string; main: string; assets?: string }
 
 export type WorkerDescriptor = {
   base: string // base worker name, finální = `${prefix}${base}`
   dir: string // cesta k workeru (kde je src/ a wrangler.dev.jsonc)
   main: string
+  build?: BuildSpec // build-before-deploy (Nuxt) → deployuje built output + assets, ne src
   services?: ServiceBinding[]
   externalServices?: ExternalServiceBinding[] // bindingy na workery mimo topologii (per-env literální jméno)
   d1?: D1Binding[]

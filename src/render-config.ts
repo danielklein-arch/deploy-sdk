@@ -28,11 +28,14 @@ export async function renderConfig(
     sharedR2.has(resource) ? `${env.ephemeral ? 'preview-' : p}${resource}` : `${p}${resource}`
   const cfg: Record<string, unknown> = {
     name: `${p}${w.base}`,
-    main: `../${w.dir}/${w.main}`, // cesta relativní k .preview/
+    // build worker → entry = built output (např. .output/server/index.mjs), jinak src. Cesta relativní k .preview/.
+    main: `../${w.dir}/${w.build?.main ?? w.main}`,
     compatibility_date: compat.date,
     compatibility_flags: compat.flags,
     workers_dev: true,
   }
+  // Static assets (Nuxt .output/public) — wrangler je servíruje, SSR worker je fallback.
+  if (w.build?.assets) cfg.assets = { directory: `../${w.dir}/${w.build.assets}` }
   const services = [
     ...(w.services?.map((s) => ({ binding: s.binding, service: `${p}${s.target}` })) ?? []),
     ...(w.externalServices?.map((s) => {
