@@ -1,4 +1,4 @@
-# @danielklein-arch/deploy-sdk
+# @danielklein/deploy-sdk
 
 Wrangler-only **Cloudflare Workers deploy engine** — orchestruje per-PR ephemeral previews
 **i** stálá prostředí (dev/staging/prod) čistě přes `wrangler` (žádná Alchemy/Terraform).
@@ -24,7 +24,7 @@ import {
   resolveEnv, provision, deployOne, entrypointInfo,
   cleanupPrefix, gc, prefixFor, parsePrefix,
   type Topology, type DeployEnv, type WorkerDescriptor,
-} from '@danielklein-arch/deploy-sdk'
+} from '@danielklein/deploy-sdk'
 
 const env = resolveEnv(topology, { preview: prNumber })      // nebo { stable: 'dev' }
 const ids = await provision(topology, env)                    // ensure sdílených zdrojů (idempotentní)

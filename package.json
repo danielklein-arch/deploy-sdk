@@ -1,5 +1,5 @@
 {
-  "name": "@danielklein-arch/deploy-sdk",
+  "name": "@danielklein/deploy-sdk",
   "version": "0.0.0",
   "type": "module",
   "description": "Wrangler-only Cloudflare Workers deploy engine — per-PR previews + stable envs (dev/staging/prod). Bun-only.",
