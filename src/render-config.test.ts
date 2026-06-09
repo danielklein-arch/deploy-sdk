@@ -102,6 +102,24 @@ test('resolveEnv: neznámé stable env → throw', () => {
   expect(() => resolveEnv(topology, { stable: 'staging' })).toThrow('neznámé stálé prostředí')
 })
 
+test('resolveEnv: per-env accountId + apiTokenEnv (multi-account)', () => {
+  const t: Topology = {
+    ...topology,
+    environments: {
+      preview: { accountId: 'acc-dev', apiTokenEnv: 'TOK_DEV' },
+      prod: { prefix: 'prod-', accountId: 'acc-prod', apiTokenEnv: 'TOK_PROD' },
+    },
+  }
+  const prev = resolveEnv(t, { preview: 1 })
+  expect(prev.accountId).toBe('acc-dev')
+  expect(prev.apiTokenEnv).toBe('TOK_DEV')
+  const prod = resolveEnv(t, { stable: 'prod' })
+  expect(prod.accountId).toBe('acc-prod')
+  expect(prod.apiTokenEnv).toBe('TOK_PROD')
+  // backward compat: bez accountId → undefined (CLI fallne na ambient)
+  expect(resolveEnv({ ...topology, environments: { dev: {} } }, { stable: 'dev' }).accountId).toBeUndefined()
+})
+
 test('render build worker: main = build output + assets binding', async () => {
   const fe: WorkerDescriptor = {
     base: 'frontend',

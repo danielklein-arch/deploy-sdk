@@ -44,10 +44,26 @@ async function loadTopology(topoPath: string): Promise<Topology> {
   return mod.topology
 }
 
+// Aktivuje per-env CF account + token do process.env → všechny wrangler shell cally i REST API
+// míří na správný account (multi-account: dbu-txs dev≠prod). Fallback na ambient (single-account).
+function activateAccount(env: DeployEnv): void {
+  const accountId = env.accountId ?? process.env.CLOUDFLARE_ACCOUNT_ID
+  if (!accountId) fail(`env '${env.name}': chybí accountId (topology) ani CLOUDFLARE_ACCOUNT_ID`)
+  process.env.CLOUDFLARE_ACCOUNT_ID = accountId
+  if (env.apiTokenEnv) {
+    const token = process.env[env.apiTokenEnv]
+    if (!token) fail(`env '${env.name}': chybí API token v env proměnné '${env.apiTokenEnv}'`)
+    process.env.CLOUDFLARE_API_TOKEN = token
+  }
+}
+
 function resolveDeployEnv(topology: Topology): DeployEnv {
-  if (process.env.STABLE_ENV) return resolveEnv(topology, { stable: process.env.STABLE_ENV })
-  if (process.env.PR_NUMBER) return resolveEnv(topology, { preview: Number(process.env.PR_NUMBER) })
-  throw new Error('PR_NUMBER (preview) nebo STABLE_ENV (stable) required')
+  let env: DeployEnv
+  if (process.env.STABLE_ENV) env = resolveEnv(topology, { stable: process.env.STABLE_ENV })
+  else if (process.env.PR_NUMBER) env = resolveEnv(topology, { preview: Number(process.env.PR_NUMBER) })
+  else throw new Error('PR_NUMBER (preview) nebo STABLE_ENV (stable) required')
+  activateAccount(env) // per-env account/token → process.env (wrangler + API)
+  return env
 }
 
 function emit(lines: string): void {
@@ -86,10 +102,10 @@ switch (cmd) {
   }
 
   case 'provision': {
-    requireAccount()
     const topology = await loadTopology(topoPath)
     warnLint(topology)
-    const env = resolveDeployEnv(topology)
+    const env = resolveDeployEnv(topology) // aktivuje per-env account/token
+    requireAccount()
     const ids = await provision(topology, env)
     const ep = entrypointInfo(topology, env)
     emit(
@@ -102,7 +118,6 @@ switch (cmd) {
   }
 
   case 'deploy': {
-    requireAccount()
     const base = positionals[1] ?? process.env.WORKER ?? fail('worker base required: deploy <worker>')
     const idsRaw = values.ids ?? process.env.PREVIEW_IDS ?? fail('PREVIEW_IDS env nebo --ids required')
     let ids: Ids
@@ -122,9 +137,9 @@ switch (cmd) {
   }
 
   case 'cleanup': {
-    const accountId = requireAccount()
     const topology = await loadTopology(topoPath)
-    const env = resolveDeployEnv(topology)
+    const env = resolveDeployEnv(topology) // aktivuje per-env account/token
+    const accountId = requireAccount()
     const { failures } = await cleanupPrefix(env.prefix, topology, { accountId, apiToken: await resolveCfToken() })
     if (failures.length) {
       console.error(`\n[cleanup] ✗ ${failures.length} zdrojů se nepodařilo smazat:`)
@@ -136,8 +151,9 @@ switch (cmd) {
   }
 
   case 'gc': {
-    const accountId = requireAccount()
     const topology = await loadTopology(topoPath)
+    activateAccount(resolveEnv(topology, { preview: 0 })) // gc maže preview orphany → preview account
+    const accountId = requireAccount()
     const apply = values.apply || process.env.GC_APPLY === 'true'
     const openPrNumbers = (values['open-prs'] ?? process.env.OPEN_PRS ?? '')
       .split(',')
@@ -156,10 +172,9 @@ switch (cmd) {
   }
 
   case 'deploy-all': {
-    requireAccount()
     const topology = await loadTopology(topoPath)
     warnLint(topology)
-    const env = resolveDeployEnv(topology)
+    const env = resolveDeployEnv(topology) // aktivuje per-env account/token
     console.log(`[deploy-all] env ${env.name} → prefix ${env.prefix}`)
     const ids = await provision(topology, env)
     const ordered = [...topology.workers].sort((a, b) => a.deployOrder - b.deployOrder)

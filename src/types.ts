@@ -74,6 +74,12 @@ export type EnvConfig = {
   vars?: Record<string, string> // env-level vars do VŠECH workerů (ENVIRONMENT se přidá automaticky)
   domains?: Record<string, string> // worker base → custom-domain FQDN (override; prod = apex)
   secrets?: Record<string, string> // secret binding → env-specific secret name (override descriptoru)
+  // CF account pro tento env (declarative, není secret). Když chybí → ambient CLOUDFLARE_ACCOUNT_ID.
+  // Pro multi-account setupy (dbu-txs: dev≠prod účet). CLI aktivuje do process.env před wrangler/API cally.
+  accountId?: string
+  // Jméno env proměnné s API tokenem pro tenhle account (token JE secret → zůstává v env).
+  // Když chybí → ambient CLOUDFLARE_API_TOKEN. Např. prod → 'CLOUDFLARE_API_TOKEN_PROD'.
+  apiTokenEnv?: string
 }
 
 // Vyřešené prostředí (preview nebo stable) — engine podle něj renderuje. Pure data.
@@ -85,4 +91,6 @@ export type DeployEnv = {
   vars: Record<string, string> // env vars merge do všech workerů (vč. ENVIRONMENT)
   domains: Record<string, string> // base → FQDN override (custom-domain workery)
   secrets: Record<string, string> // binding → secretName override
+  accountId?: string // CF account pro env (jinak ambient CLOUDFLARE_ACCOUNT_ID)
+  apiTokenEnv?: string // env proměnná s tokenem pro account (jinak ambient CLOUDFLARE_API_TOKEN)
 }

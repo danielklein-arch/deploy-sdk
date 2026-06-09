@@ -16,6 +16,8 @@ export function resolveEnv(topology: Topology, sel: EnvSelector): DeployEnv {
       vars: { ENVIRONMENT: 'preview', ...previewCfg?.vars },
       domains: previewCfg?.domains ?? {},
       secrets: previewCfg?.secrets ?? {},
+      accountId: previewCfg?.accountId,
+      apiTokenEnv: previewCfg?.apiTokenEnv,
     }
   }
   const cfg = topology.environments[sel.stable]
@@ -28,6 +30,8 @@ export function resolveEnv(topology: Topology, sel: EnvSelector): DeployEnv {
     vars: { ENVIRONMENT: sel.stable, ...cfg.vars },
     domains: cfg.domains ?? {},
     secrets: cfg.secrets ?? {},
+    accountId: cfg.accountId,
+    apiTokenEnv: cfg.apiTokenEnv,
   }
 }
 
