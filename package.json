@@ -1,8 +1,8 @@
 {
   "name": "@danielklein/deploy-sdk",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Wrangler-only Cloudflare Workers deploy engine — per-PR previews + stable envs (dev/staging/prod). Bun-only.",
+  "description": "Wrangler-only Cloudflare Workers deploy engine + CLI — per-PR previews + stable envs (dev/staging/prod). Bun-only.",
   "license": "MIT",
   "exports": {
     ".": {
@@ -10,12 +10,15 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "deploy-sdk": "./dist/cli.js"
+  },
   "files": ["dist", "src"],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build ./src/index.ts --outdir dist --target bun && tsc",
+    "build": "rm -rf dist && bun build ./src/index.ts ./src/cli.ts --outdir dist --target bun && tsc",
     "typecheck": "tsc --noEmit",
     "prepare": "bun run build"
   },
