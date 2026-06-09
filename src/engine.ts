@@ -7,6 +7,7 @@ import {
   ensureQueue,
   ensureR2,
   applyD1Migrations,
+  hasSqlMigrations,
   deployWorker,
   consoleLogger,
   type Logger,
@@ -50,7 +51,14 @@ export async function deployOne(
     compat: topology.compat,
     sharedR2Resources: topology.sharedR2Resources,
   })
-  if (w.d1?.length) for (const d of w.d1) await applyD1Migrations(`${env.prefix}${d.resource}`, cfg)
+  // D1 migrace jen když worker má `migrations/` s .sql — jinak skip (wrangler by jinak tvrdě padl).
+  if (w.d1?.length) {
+    if (hasSqlMigrations(w.dir)) {
+      for (const d of w.d1) await applyD1Migrations(`${env.prefix}${d.resource}`, cfg)
+    } else {
+      log.info(`[d1] ${w.base} nemá migrations/ → skip migrate`)
+    }
+  }
   const url = await deployWorker(cfg, { log })
   log.info(`[deploy] ${env.prefix}${w.base} → ${url}`)
   return url

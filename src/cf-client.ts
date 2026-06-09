@@ -2,6 +2,7 @@
 // VEŠKERÉ křehké parsování CLI výstupu žije TADY → jediné místo k opravě při bumpu wrangleru.
 // Každý parser asertuje očekávaný formát → změna výstupu spadne hlučně, ne tiše.
 // Ověřeno proti wrangler 4.98.0 (přesný pin v package.json).
+import { existsSync, readdirSync } from 'node:fs'
 import { $ } from 'bun'
 
 export type Logger = { info: (m: string) => void; warn: (m: string) => void }
@@ -111,6 +112,14 @@ export async function ensureR2(name: string, log: Logger = consoleLogger): Promi
 }
 
 // ── D1 migrace ───────────────────────────────────────────────────────────────
+
+// True když `<dir>/migrations` existuje a má aspoň 1 `.sql`. Bez migrací wrangler `migrations apply`
+// tvrdě padá ("No migrations present at <dir>") → v paralelním matrixu kaskáda 10143 na závislých
+// workerech. Proto migrate krok přeskočíme, když není co aplikovat.
+export function hasSqlMigrations(workerDir: string): boolean {
+  const dir = `${workerDir}/migrations`
+  return existsSync(dir) && readdirSync(dir).some((f) => f.endsWith('.sql'))
+}
 
 export async function applyD1Migrations(dbName: string, configPath: string): Promise<void> {
   await $`bunx wrangler d1 migrations apply ${dbName} --remote -c ${configPath}`

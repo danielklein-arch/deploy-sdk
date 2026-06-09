@@ -1,6 +1,6 @@
 {
   "name": "@danielklein/deploy-sdk",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Wrangler-only Cloudflare Workers deploy engine + CLI — per-PR previews + stable envs (dev/staging/prod). Bun-only.",
   "license": "MIT",
