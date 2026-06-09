@@ -171,7 +171,15 @@ export async function r2ObjectKeys(bucket: string, ctx: CfCtx): Promise<string[]
 
 export const removeQueueConsumer = (queue: string, worker: string) =>
   $`bunx wrangler queues consumer remove ${queue} ${worker}`.quiet()
-export const deleteWorker = (name: string) => $`bunx wrangler delete --name ${name} --force`.quiet()
+// `wrangler delete` umí workera smazat a PŘESTO vrátit exit 1 (post-delete chyba na route/doméně);
+// následný retry pak narazí na 10090 „does not exist". Obojí = už smazaný → success (žádná false-failure).
+export async function deleteWorker(name: string): Promise<void> {
+  const res = await $`bunx wrangler delete --name ${name} --force`.quiet().nothrow()
+  if (res.exitCode === 0) return
+  const out = res.stdout.toString() + res.stderr.toString()
+  if (/code: 10090|does not exist/.test(out)) return // worker už neexistuje = success
+  throw new Error(`worker delete failed:\n${out}`)
+}
 export const deleteQueue = (name: string) => $`bunx wrangler queues delete ${name}`.quiet()
 export const deleteR2Object = (bucket: string, key: string) =>
   $`bunx wrangler r2 object delete ${`${bucket}/${key}`} --remote`.quiet()
