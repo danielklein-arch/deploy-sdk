@@ -28,6 +28,9 @@ export async function provision(
   for (const r of topology.kvResources) ids.kv[r] = await ensureKv(`${env.prefix}${r}`, log)
   for (const r of topology.queueResources) await ensureQueue(`${env.prefix}${r}`, log)
   for (const r of topology.r2Resources) await ensureR2(`${env.prefix}${r}`, log)
+  // Shared buckety: preview kolabuje na `preview-${r}` (1 pro všechny PR), stable per-env. Persistují.
+  for (const r of topology.sharedR2Resources ?? [])
+    await ensureR2(`${env.ephemeral ? 'preview-' : env.prefix}${r}`, log)
   return ids
 }
 
@@ -45,6 +48,7 @@ export async function deployOne(
     previewZone: topology.previewZone,
     secretsStoreId: topology.secretsStoreId,
     compat: topology.compat,
+    sharedR2Resources: topology.sharedR2Resources,
   })
   if (w.d1?.length) for (const d of w.d1) await applyD1Migrations(`${env.prefix}${d.resource}`, cfg)
   const url = await deployWorker(cfg, { log })

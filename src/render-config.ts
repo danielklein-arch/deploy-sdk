@@ -12,15 +12,20 @@ export type RenderOpts = {
   previewZone: string // zóna pro default custom domény
   secretsStoreId: string // CF Secrets Store id (account-specific → injektuje volající)
   compat: { date: string; flags: string[] } // compatibility_date + flags (consumer policy)
+  sharedR2Resources?: readonly string[] // shared buckety (preview kolabuje na `preview-`, neteardownují se)
 }
 
 // Vrací cestu k zapsanému `.preview/<base>.json`. Async — write se musí flushnout, než cestu
 // předáme wrangleru (jinak read-after-write race).
 export async function renderConfig(
   w: WorkerDescriptor,
-  { env, ids, previewZone, secretsStoreId, compat }: RenderOpts,
+  { env, ids, previewZone, secretsStoreId, compat, sharedR2Resources }: RenderOpts,
 ): Promise<string> {
   const p = env.prefix
+  const sharedR2 = new Set(sharedR2Resources ?? [])
+  // Shared bucket: preview všech PR sdílí `preview-${r}`; stable = `${prefix}${r}`. Non-shared = per-PR `${prefix}${r}`.
+  const bucketName = (resource: string): string =>
+    sharedR2.has(resource) ? `${env.ephemeral ? 'preview-' : p}${resource}` : `${p}${resource}`
   const cfg: Record<string, unknown> = {
     name: `${p}${w.base}`,
     main: `../${w.dir}/${w.main}`, // cesta relativní k .preview/
@@ -28,8 +33,15 @@ export async function renderConfig(
     compatibility_flags: compat.flags,
     workers_dev: true,
   }
-  if (w.services?.length)
-    cfg.services = w.services.map((s) => ({ binding: s.binding, service: `${p}${s.target}` }))
+  const services = [
+    ...(w.services?.map((s) => ({ binding: s.binding, service: `${p}${s.target}` })) ?? []),
+    ...(w.externalServices?.map((s) => {
+      const name = s.namesByEnv[env.key]
+      if (!name) throw new Error(`external service '${s.binding}': chybí jméno pro env '${env.key}'`)
+      return { binding: s.binding, service: name } // literální jméno, BEZ prefixu
+    }) ?? []),
+  ]
+  if (services.length) cfg.services = services
   if (w.d1?.length)
     cfg.d1_databases = w.d1.map((d) => ({
       binding: d.binding,
@@ -38,7 +50,7 @@ export async function renderConfig(
       migrations_dir: `../${w.dir}/migrations`,
     }))
   if (w.kv?.length) cfg.kv_namespaces = w.kv.map((k) => ({ binding: k.binding, id: ids.kv[k.resource] }))
-  if (w.r2?.length) cfg.r2_buckets = w.r2.map((b) => ({ binding: b.binding, bucket_name: `${p}${b.resource}` }))
+  if (w.r2?.length) cfg.r2_buckets = w.r2.map((b) => ({ binding: b.binding, bucket_name: bucketName(b.resource) }))
   if (w.secretsStore?.length)
     cfg.secrets_store_secrets = w.secretsStore.map((s) => ({
       binding: s.binding,
@@ -74,7 +86,8 @@ export async function renderConfig(
   }))
   if (producers?.length || consumers?.length)
     cfg.queues = { ...(producers?.length && { producers }), ...(consumers?.length && { consumers }) }
-  const vars: Record<string, string> = { ...env.vars, ...w.vars }
+  // Precedence: env-level (všem workerům) < worker flat < per-worker per-env override. Per-env vyhrává → žádný reset.
+  const vars: Record<string, string> = { ...env.vars, ...w.vars, ...(w.varsByEnv?.[env.key] ?? {}) }
   // Generická injekce custom-domain URL jiného workeru (env-aware: prod apex override).
   if (w.injectUrlOf)
     vars[w.injectUrlOf.var] = `https://${resolveDomain(env, w.injectUrlOf.worker, previewZone)}`

@@ -12,6 +12,7 @@ import {
   entrypointInfo,
   cleanupPrefix,
   gc,
+  lintTopology,
   type Topology,
   type DeployEnv,
   type Ids,
@@ -31,6 +32,7 @@ function usage(): never {
   cleanup                teardown všech zdrojů pro prefix prostředí (exit 1 při failures)
   gc --open-prs <csv>    smaž osiřelé pr-*-* (zavřené PR); [--apply], jinak dry-run
   deploy-all             lokální: provision + sériový deploy všech workerů
+  lint                   statická kontrola topologie (env-reset past) — advisory
 
 Common: -t/--topology <path> (default $TOPOLOGY_PATH || ./topology.ts; resolve z cwd)
 Env: PR_NUMBER (preview) | STABLE_ENV (stable), CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN`)
@@ -57,6 +59,11 @@ function requireAccount(): string {
   return process.env.CLOUDFLARE_ACCOUNT_ID ?? fail('CLOUDFLARE_ACCOUNT_ID env required')
 }
 
+// Advisory lint — vypíše varování (env-reset past), neblokuje.
+function warnLint(topology: Topology): void {
+  for (const w of lintTopology(topology)) console.warn(`[lint] ⚠ ${w}`)
+}
+
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
@@ -70,9 +77,18 @@ const cmd = positionals[0]
 const topoPath = values.topology ?? process.env.TOPOLOGY_PATH ?? './topology.ts'
 
 switch (cmd) {
+  case 'lint': {
+    const topology = await loadTopology(topoPath)
+    const warnings = lintTopology(topology)
+    for (const w of warnings) console.warn(`[lint] ⚠ ${w}`)
+    console.log(warnings.length ? `[lint] ${warnings.length} varování` : '[lint] ✓ čisté')
+    break
+  }
+
   case 'provision': {
     requireAccount()
     const topology = await loadTopology(topoPath)
+    warnLint(topology)
     const env = resolveDeployEnv(topology)
     const ids = await provision(topology, env)
     const ep = entrypointInfo(topology, env)
@@ -142,6 +158,7 @@ switch (cmd) {
   case 'deploy-all': {
     requireAccount()
     const topology = await loadTopology(topoPath)
+    warnLint(topology)
     const env = resolveDeployEnv(topology)
     console.log(`[deploy-all] env ${env.name} → prefix ${env.prefix}`)
     const ids = await provision(topology, env)

@@ -2,6 +2,9 @@
 // objekt jako DATA; engine funkce ho berou parametrem (žádný import konkrétní topologie).
 
 export type ServiceBinding = { binding: string; target: string } // target = base name jiného workeru
+// External service binding — cíl běží mimo tuhle topologii (jiný repo/pipeline, např. MDM).
+// Literální jméno per env (neprefixuje se, neprovisionuje se, necleanupuje se).
+export type ExternalServiceBinding = { binding: string; namesByEnv: Record<string, string> }
 export type D1Binding = { binding: string; resource: string } // resource = base name DB
 export type KvBinding = { binding: string; resource: string }
 export type QueueProducer = { binding: string; resource: string }
@@ -17,6 +20,7 @@ export type WorkerDescriptor = {
   dir: string // cesta k workeru (kde je src/ a wrangler.dev.jsonc)
   main: string
   services?: ServiceBinding[]
+  externalServices?: ExternalServiceBinding[] // bindingy na workery mimo topologii (per-env literální jméno)
   d1?: D1Binding[]
   kv?: KvBinding[]
   r2?: R2Binding[]
@@ -27,6 +31,9 @@ export type WorkerDescriptor = {
   queueProducers?: QueueProducer[]
   queueConsumers?: QueueConsumer[]
   vars?: Record<string, string>
+  // Per-worker per-env override varů (klíč = env.key: 'preview'|'dev'|'staging'|'prod'). Vyhrává nad flat `vars`.
+  // Řeší env-specific config (FINBRICKS_BASE_URI sandbox vs prod, STORAGE_URL) BEZ resetu — každý env renderuje svou hodnotu.
+  varsByEnv?: Record<string, Record<string, string>>
   // Injektuj custom-domain URL JINÉHO workeru jako var (generické — nahrazuje hardcoded frontend→GATEWAY_URL).
   // var = jméno env proměnné, worker = base name workeru s custom doménou.
   injectUrlOf?: { var: string; worker: string }
@@ -44,6 +51,9 @@ export type Topology = {
   kvResources: readonly string[]
   queueResources: readonly string[]
   r2Resources: readonly string[]
+  // Sdílené R2 buckety: preview kolabuje na 1 (`preview-${r}`), stable per-env (`dev-`/`staging-`/`prod-`).
+  // NEteardownují se na PR close (persistují). Vhodné pro dokumenty s public custom domain.
+  sharedR2Resources?: readonly string[]
   previewZone: string // zóna pro per-PR custom domény (gateway)
   secretsStoreId: string // CF Secrets Store id (account-specific)
   compat: { date: string; flags: string[] } // compatibility_date + flags (consumer policy, ne engine)
@@ -64,6 +74,7 @@ export type EnvConfig = {
 // Vyřešené prostředí (preview nebo stable) — engine podle něj renderuje. Pure data.
 export type DeployEnv = {
   name: string // 'pr-123' | 'dev' | 'staging' | 'prod'
+  key: string // lookup klíč pro varsByEnv / externalServices: 'preview' | stable name ('dev'|'staging'|'prod')
   prefix: string // 'pr-123-' | 'dev-' | …
   ephemeral: boolean // preview=true (teardown), stable=false (persistuje)
   vars: Record<string, string> // env vars merge do všech workerů (vč. ENVIRONMENT)

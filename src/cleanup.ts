@@ -72,6 +72,7 @@ export async function cleanupPrefix(
     await tryRun(`queue ${prefix}${r}`, () => deleteQueue(`${prefix}${r}`))
 
   // R2 — bucket nejde smazat neprázdný → nejdřív objekty (list přes CF API), pak bucket.
+  // POZN.: jen per-PR `r2Resources`. `sharedR2Resources` se ZÁMĚRNĚ neteardownují (persistují přes PR).
   for (const r of r2Resources) {
     const bucket = `${prefix}${r}`
     await tryRun(`r2 ${bucket}`, async () => {

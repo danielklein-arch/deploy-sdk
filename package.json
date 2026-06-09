@@ -1,6 +1,6 @@
 {
   "name": "@danielklein/deploy-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Wrangler-only Cloudflare Workers deploy engine + CLI — per-PR previews + stable envs (dev/staging/prod). Bun-only.",
   "license": "MIT",
@@ -20,6 +20,7 @@
   "scripts": {
     "build": "rm -rf dist && bun build ./src/index.ts ./src/cli.ts --outdir dist --target bun && tsc",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "prepare": "bun run build"
   },
   "peerDependencies": {

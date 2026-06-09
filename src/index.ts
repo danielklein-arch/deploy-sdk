@@ -4,6 +4,7 @@ export type {
   Topology,
   WorkerDescriptor,
   ServiceBinding,
+  ExternalServiceBinding,
   D1Binding,
   KvBinding,
   R2Binding,
@@ -21,4 +22,5 @@ export { resolveEnv, resolveDomain, type EnvSelector } from './env'
 export { cleanupPrefix, type CleanupResult, type CleanupCtx } from './cleanup'
 export { gc, type GcOpts, type GcResult } from './gc'
 export { renderConfig, type RenderOpts } from './render-config'
+export { lintTopology } from './lint'
 export { consoleLogger, type Logger, type Ids, type CfCtx } from './cf-client'
