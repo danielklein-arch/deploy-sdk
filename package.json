@@ -11,10 +11,13 @@
     }
   },
   "files": ["dist", "src"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "rm -rf dist && bun build ./src/index.ts --outdir dist --target bun && tsc",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepare": "bun run build"
   },
   "peerDependencies": {
     "wrangler": ">=4"
