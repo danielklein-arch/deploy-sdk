@@ -6,6 +6,14 @@ import { resolveDomain } from './env'
 
 const PREVIEW_DIR = '.preview'
 
+// Resolved vars workeru pro daný env (sdílené renderem i build hookem → SPA build dostane stejné NUXT_PUBLIC_*).
+// Precedence: env-level < worker flat < per-worker per-env override; + injektnutá custom-domain URL jiného workeru.
+export function computeVars(w: WorkerDescriptor, env: DeployEnv, previewZone: string): Record<string, string> {
+  const vars: Record<string, string> = { ...env.vars, ...w.vars, ...(w.varsByEnv?.[env.key] ?? {}) }
+  if (w.injectUrlOf) vars[w.injectUrlOf.var] = `https://${resolveDomain(env, w.injectUrlOf.worker, previewZone)}`
+  return vars
+}
+
 export type RenderOpts = {
   env: DeployEnv
   ids: Ids
@@ -89,11 +97,7 @@ export async function renderConfig(
   }))
   if (producers?.length || consumers?.length)
     cfg.queues = { ...(producers?.length && { producers }), ...(consumers?.length && { consumers }) }
-  // Precedence: env-level (všem workerům) < worker flat < per-worker per-env override. Per-env vyhrává → žádný reset.
-  const vars: Record<string, string> = { ...env.vars, ...w.vars, ...(w.varsByEnv?.[env.key] ?? {}) }
-  // Generická injekce custom-domain URL jiného workeru (env-aware: prod apex override).
-  if (w.injectUrlOf)
-    vars[w.injectUrlOf.var] = `https://${resolveDomain(env, w.injectUrlOf.worker, previewZone)}`
+  const vars = computeVars(w, env, previewZone)
   if (Object.keys(vars).length) cfg.vars = vars
 
   const path = `${PREVIEW_DIR}/${w.base}.json`

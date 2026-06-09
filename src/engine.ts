@@ -14,7 +14,7 @@ import {
   type Logger,
   type Ids,
 } from './cf-client'
-import { renderConfig } from './render-config'
+import { computeVars, renderConfig } from './render-config'
 import { resolveDomain } from './env'
 
 export { prefixFor, parsePrefix } from './prefix'
@@ -45,9 +45,11 @@ export async function deployOne(
 ): Promise<string> {
   const { ids, log = consoleLogger } = opts
   // Build-before-deploy (Nuxt apod.) — spustí se z consumer root před renderem/deployem.
+  // Resolved per-env vars injektujeme do build env → SPA zabakuje správné NUXT_PUBLIC_* per prostředí.
   if (w.build) {
+    const buildEnv = computeVars(w, env, topology.previewZone)
     log.info(`[build] ${w.base}: ${w.build.command}`)
-    await $`sh -c ${w.build.command}`
+    await $`sh -c ${w.build.command}`.env({ ...process.env, ...buildEnv })
   }
   const cfg = await renderConfig(w, {
     env,
