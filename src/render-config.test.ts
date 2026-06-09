@@ -102,23 +102,47 @@ test('resolveEnv: neznámé stable env → throw', () => {
   expect(() => resolveEnv(topology, { stable: 'staging' })).toThrow('neznámé stálé prostředí')
 })
 
-test('lint: sensitive flat var → warning; flat+perEnv → warning', () => {
+test('lint: sensitive flat var + flat/perEnv kolize; ACCOUNT_ID NEhlásí', () => {
   const lintTopo: Topology = {
     ...topology,
     workers: [
-      { base: 'a', dir: 'a', main: 'i.ts', vars: { FINBRICKS_BASE_URI: 'https://x' }, deployOrder: 0 },
       {
-        base: 'b',
-        dir: 'b',
+        base: 'a',
+        dir: 'a',
         main: 'i.ts',
-        vars: { TIER: 'x' },
-        varsByEnv: { prod: { TIER: 'y' } },
+        vars: { FINBRICKS_BASE_URI: 'https://x', CLOUDFLARE_ACCOUNT_ID: 'acc', FINBRICKS_MERCHANT_ID: 'm' },
         deployOrder: 0,
       },
+      { base: 'b', dir: 'b', main: 'i.ts', vars: { TIER: 'x' }, varsByEnv: { prod: { TIER: 'y' } }, deployOrder: 0 },
     ],
   }
   const warnings = lintTopology(lintTopo)
   expect(warnings.some((w) => w.includes("'FINBRICKS_BASE_URI'"))).toBe(true)
-  expect(warnings.some((w) => w.includes('a:'))).toBe(true)
+  expect(warnings.some((w) => w.includes("'FINBRICKS_MERCHANT_ID'"))).toBe(true) // MERCHANT substring
+  expect(warnings.some((w) => w.includes("'CLOUDFLARE_ACCOUNT_ID'"))).toBe(false) // _ID už nehlásí
   expect(warnings.some((w) => w.includes("'TIER'") && w.includes('b:'))).toBe(true)
+})
+
+test('lint: r2 v obou listech → warning', () => {
+  const t: Topology = { ...topology, r2Resources: ['documents'], sharedR2Resources: ['documents'], workers: [] }
+  expect(lintTopology(t).some((w) => w.includes("r2 'documents'"))).toBe(true)
+})
+
+test('lint: duplicitní service binding (services + externalServices) → warning', () => {
+  const t: Topology = {
+    ...topology,
+    r2Resources: [],
+    sharedR2Resources: [],
+    workers: [
+      {
+        base: 'g',
+        dir: 'g',
+        main: 'i.ts',
+        services: [{ binding: 'MDM_GATEWAY', target: 'mdm' }],
+        externalServices: [{ binding: 'MDM_GATEWAY', namesByEnv: { preview: 'x' } }],
+        deployOrder: 0,
+      },
+    ],
+  }
+  expect(lintTopology(t).some((w) => w.includes("'MDM_GATEWAY'") && w.includes('kolize'))).toBe(true)
 })
