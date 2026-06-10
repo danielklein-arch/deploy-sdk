@@ -18,7 +18,7 @@ export type {
   DeployEnv,
 } from './types'
 
-export { provision, deployOne, prefixFor, parsePrefix, entrypointInfo } from './engine'
+export { provision, deployOne, migrateOne, prefixFor, parsePrefix, entrypointInfo } from './engine'
 export { resolveEnv, resolveDomain, type EnvSelector } from './env'
 export { cleanupPrefix, type CleanupResult, type CleanupCtx } from './cleanup'
 export { gc, type GcOpts, type GcResult } from './gc'

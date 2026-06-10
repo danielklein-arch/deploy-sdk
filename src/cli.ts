@@ -9,6 +9,7 @@ import {
   resolveEnv,
   provision,
   deployOne,
+  migrateOne,
   entrypointInfo,
   cleanupPrefix,
   gc,
@@ -29,6 +30,8 @@ function usage(): never {
 
   provision              ensure sdílených zdrojů → emit ids/matrix/entrypoint/entrypointUrl
   deploy <worker>        deploy 1 workeru (PREVIEW_IDS env nebo --ids); zapíše .preview/url-<w>.txt
+                         SKIP_MIGRATIONS=1 → přeskočí D1 migrace (stable: explicitní migrate krok)
+  migrate                seriálně D1 migrace všech workerů s migrations/ (PREVIEW_IDS env nebo --ids)
   cleanup                teardown všech zdrojů pro prefix prostředí (exit 1 při failures)
   gc --open-prs <csv>    smaž osiřelé pr-*-* (zavřené PR); [--apply], jinak dry-run
   deploy-all             lokální: provision + sériový deploy všech workerů
@@ -75,6 +78,15 @@ function requireAccount(): string {
   return process.env.CLOUDFLARE_ACCOUNT_ID ?? fail('CLOUDFLARE_ACCOUNT_ID env required')
 }
 
+function parseIds(): Ids {
+  const raw = values.ids ?? process.env.PREVIEW_IDS ?? fail('PREVIEW_IDS env nebo --ids required')
+  try {
+    return JSON.parse(raw)
+  } catch {
+    throw new Error('PREVIEW_IDS/--ids není validní JSON')
+  }
+}
+
 // Advisory lint — vypíše varování (env-reset past), neblokuje.
 function warnLint(topology: Topology): void {
   for (const w of lintTopology(topology)) console.warn(`[lint] ⚠ ${w}`)
@@ -119,20 +131,25 @@ switch (cmd) {
 
   case 'deploy': {
     const base = positionals[1] ?? process.env.WORKER ?? fail('worker base required: deploy <worker>')
-    const idsRaw = values.ids ?? process.env.PREVIEW_IDS ?? fail('PREVIEW_IDS env nebo --ids required')
-    let ids: Ids
-    try {
-      ids = JSON.parse(idsRaw)
-    } catch {
-      throw new Error('PREVIEW_IDS/--ids není validní JSON')
-    }
+    const ids = parseIds()
     const topology = await loadTopology(topoPath)
     const env = resolveDeployEnv(topology)
     const w = topology.workers.find((x) => x.base === base)
     if (!w) throw new Error(`neznámý worker: ${base}`)
-    const url = await deployOne(w, topology, env, { ids })
+    const url = await deployOne(w, topology, env, { ids, skipMigrations: process.env.SKIP_MIGRATIONS === '1' })
     await Bun.write(`.preview/url-${base}.txt`, url)
     console.log(`URL=${url}`)
+    break
+  }
+
+  // Explicitní pre-deploy migrace (stable envy): seriálně, fail = exit ≠ 0 → deploy se nespustí.
+  case 'migrate': {
+    const ids = parseIds()
+    const topology = await loadTopology(topoPath)
+    const env = resolveDeployEnv(topology)
+    const ordered = [...topology.workers].sort((a, b) => a.deployOrder - b.deployOrder)
+    for (const w of ordered) await migrateOne(w, topology, env, { ids })
+    console.log(`[migrate] ✓ env ${env.name} hotovo`)
     break
   }
 

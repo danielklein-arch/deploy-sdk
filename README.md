@@ -12,16 +12,20 @@ skripty / GitHub workflowy. Engine je topology-agnostický — funkce berou `Top
 parametrem, žádný `process.env` uvnitř.
 
 - **Prostředí** = `resolveEnv(topology, { preview: N })` (ephemeral `pr-<N>-`) nebo
-  `{ stable: 'dev' }` (persistent `dev-`/`staging-`/`prod-`). Per-env prefix / vars / domény
-  (prod apex) / secrets.
-- **Per-PR preview**: provision sdílených zdrojů → deploy workerů (matrix) → teardown na zavření PR.
-- **Stálé prostředí**: push do dev/staging/prod větve → deploy, persistuje (žádný teardown).
+  `{ stable: 'dev' }` (persistent `dev-`/`staging-`/`production-`). Per-env prefix / vars / domény
+  (prod apex) / secrets / `accountId`+`apiTokenEnv` (multi-account) / `secretsStoreId` (per-account store).
+- **Branch→env mapping**: `EnvConfig.branch` — větev `prod` mapuje na env `production`
+  (`resolveEnv` zkusí přímý klíč, pak scan podle `branch`). Prefix/ENVIRONMENT = env key.
+- **Per-PR preview**: provision sdílených zdrojů → deploy workerů (matrix, migrace in-deploy) →
+  teardown na zavření PR.
+- **Stálé prostředí**: push do dev/staging/prod větve → CLI `migrate` (explicitní seriální D1 migrace)
+  → deploy se `SKIP_MIGRATIONS=1`, persistuje (žádný teardown).
 
 ## Veřejné API
 
 ```ts
 import {
-  resolveEnv, provision, deployOne, entrypointInfo,
+  resolveEnv, provision, deployOne, migrateOne, entrypointInfo,
   cleanupPrefix, gc, prefixFor, parsePrefix,
   type Topology, type DeployEnv, type WorkerDescriptor,
 } from '@danielklein/deploy-sdk'
@@ -33,10 +37,16 @@ await cleanupPrefix(env.prefix, topology, { accountId, apiToken })  // teardown 
 await gc(topology, openPrNumbers, ctx, { apply })             // orphan cleanup zavřených PR
 ```
 
+## CLI
+
+`bunx deploy-sdk provision|deploy|migrate|cleanup|gc|deploy-all|lint` — env přes
+`PR_NUMBER`/`STABLE_ENV` + `CLOUDFLARE_*`; `migrate` = explicitní pre-deploy D1 migrace
+(stable envy), `deploy` s `SKIP_MIGRATIONS=1` je přeskočí.
+
 ## Stav
 
-`0.0.0` — extrahováno z `dbu-txs-preview-lab` (referenční consumer: lab + `examples/minimal-app`).
-TODO před `1.0`: CLI bin (`npx deploy-sdk provision|deploy|gc`), npm publish, scope.
+`0.5.0` — extrahováno z `dbu-txs-preview-lab` (referenční consumer: lab + `examples/minimal-app`).
+0.5.0: branch→env mapping, per-env `secretsStoreId`, `migrate` příkaz + `migrateOne`.
 
 ## Build
 

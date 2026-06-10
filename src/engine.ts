@@ -36,14 +36,44 @@ export async function provision(
   return ids
 }
 
-// Render configu → migrace D1 → deploy jednoho workeru. Vrací jeho URL.
-export async function deployOne(
+const render = (w: WorkerDescriptor, topology: Topology, env: DeployEnv, ids: Ids): Promise<string> =>
+  renderConfig(w, {
+    env,
+    ids,
+    previewZone: topology.previewZone,
+    secretsStoreId: env.secretsStoreId,
+    compat: topology.compat,
+    sharedR2Resources: topology.sharedR2Resources,
+  })
+
+// D1 migrace jednoho workeru (render config + wrangler d1 migrations apply). Samostatně volatelná
+// pro explicitní pre-deploy migrate krok u stable envů; deployOne ji volá inline (preview default).
+export async function migrateOne(
   w: WorkerDescriptor,
   topology: Topology,
   env: DeployEnv,
   opts: { ids: Ids; log?: Logger },
-): Promise<string> {
+): Promise<void> {
   const { ids, log = consoleLogger } = opts
+  if (!w.d1?.length) return
+  // jen když worker má `migrations/` s .sql — jinak skip (wrangler by jinak tvrdě padl)
+  if (!hasSqlMigrations(w.dir)) {
+    log.info(`[d1] ${w.base} nemá migrations/ → skip migrate`)
+    return
+  }
+  const cfg = await render(w, topology, env, ids)
+  for (const d of w.d1) await applyD1Migrations(`${env.prefix}${d.resource}`, cfg)
+}
+
+// Render configu → migrace D1 → deploy jednoho workeru. Vrací jeho URL.
+// skipMigrations: stable pipeline migruje explicitním krokem před deployem → tady přeskočit.
+export async function deployOne(
+  w: WorkerDescriptor,
+  topology: Topology,
+  env: DeployEnv,
+  opts: { ids: Ids; log?: Logger; skipMigrations?: boolean },
+): Promise<string> {
+  const { ids, log = consoleLogger, skipMigrations = false } = opts
   // Build-before-deploy (Nuxt apod.) — spustí se z consumer root před renderem/deployem.
   // Resolved per-env vars injektujeme do build env → SPA zabakuje správné NUXT_PUBLIC_* per prostředí.
   if (w.build) {
@@ -51,22 +81,8 @@ export async function deployOne(
     log.info(`[build] ${w.base}: ${w.build.command}`)
     await $`sh -c ${w.build.command}`.env({ ...process.env, ...buildEnv })
   }
-  const cfg = await renderConfig(w, {
-    env,
-    ids,
-    previewZone: topology.previewZone,
-    secretsStoreId: topology.secretsStoreId,
-    compat: topology.compat,
-    sharedR2Resources: topology.sharedR2Resources,
-  })
-  // D1 migrace jen když worker má `migrations/` s .sql — jinak skip (wrangler by jinak tvrdě padl).
-  if (w.d1?.length) {
-    if (hasSqlMigrations(w.dir)) {
-      for (const d of w.d1) await applyD1Migrations(`${env.prefix}${d.resource}`, cfg)
-    } else {
-      log.info(`[d1] ${w.base} nemá migrations/ → skip migrate`)
-    }
-  }
+  const cfg = await render(w, topology, env, ids)
+  if (!skipMigrations) await migrateOne(w, topology, env, { ids, log })
   const url = await deployWorker(cfg, { log })
   log.info(`[deploy] ${env.prefix}${w.base} → ${url}`)
   return url

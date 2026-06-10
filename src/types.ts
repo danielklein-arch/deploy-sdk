@@ -36,7 +36,7 @@ export type WorkerDescriptor = {
   queueProducers?: QueueProducer[]
   queueConsumers?: QueueConsumer[]
   vars?: Record<string, string>
-  // Per-worker per-env override varů (klíč = env.key: 'preview'|'dev'|'staging'|'prod'). Vyhrává nad flat `vars`.
+  // Per-worker per-env override varů (klíč = env.key: 'preview'|'dev'|'staging'|'production'). Vyhrává nad flat `vars`.
   // Řeší env-specific config (FINBRICKS_BASE_URI sandbox vs prod, STORAGE_URL) BEZ resetu — každý env renderuje svou hodnotu.
   varsByEnv?: Record<string, Record<string, string>>
   // Injektuj custom-domain URL JINÉHO workeru jako var (generické — nahrazuje hardcoded frontend→GATEWAY_URL).
@@ -71,6 +71,11 @@ export type Topology = {
 // Per-prostředí konfigurace stálého env (dev/staging/prod).
 export type EnvConfig = {
   prefix?: string // resource prefix; default `${name}-`
+  // Git branch mapující na tento env, když se jméno liší (branch 'prod' → env 'production').
+  // resolveEnv: přímý klíč má přednost, pak scan podle branch.
+  branch?: string
+  // Per-env CF Secrets Store id (multi-account: každý account má vlastní store). Fallback topology.secretsStoreId.
+  secretsStoreId?: string
   vars?: Record<string, string> // env-level vars do VŠECH workerů (ENVIRONMENT se přidá automaticky)
   domains?: Record<string, string> // worker base → custom-domain FQDN (override; prod = apex)
   secrets?: Record<string, string> // secret binding → env-specific secret name (override descriptoru)
@@ -93,4 +98,5 @@ export type DeployEnv = {
   secrets: Record<string, string> // binding → secretName override
   accountId?: string // CF account pro env (jinak ambient CLOUDFLARE_ACCOUNT_ID)
   apiTokenEnv?: string // env proměnná s tokenem pro account (jinak ambient CLOUDFLARE_API_TOKEN)
+  secretsStoreId: string // resolved store id (env override ?? topology.secretsStoreId)
 }
