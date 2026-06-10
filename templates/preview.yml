@@ -1,0 +1,167 @@
+name: PR Preview
+
+# CD lifecycle (deploy/cleanup). Quality kontrola bezi PARALELNE v ci.yml (zadny gate tady —
+# rozbity preview je levny, merge hlida branch protection na ci.yml checks).
+# Prizpusob: trigger branches (promotion-PR previews = pridej vetev), SMOKE_SCRIPT, bun-version.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+    branches: [dev]
+
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Stage 1: sdilene zdroje JEDNOU + emit matice workeru + entrypoint pro smoke/comment.
+  provision:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # sticky komentar
+    outputs:
+      ids: ${{ steps.p.outputs.ids }}
+      matrix: ${{ steps.p.outputs.matrix }}
+      entrypoint: ${{ steps.p.outputs.entrypoint }}
+      entrypointUrl: ${{ steps.p.outputs.entrypointUrl }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PR_NUMBER: ${{ github.event.number }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: preview
+          message: |
+            ### ⏳ Preview pro PR #${{ github.event.number }} se nasazuje…
+            [Detail běhu](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+      - id: p
+        run: bunx deploy-sdk provision
+
+  # Stage 2: kazdy worker paralelne. fail-fast:false → jeden pad nezabije ostatni, smoke to nahlasi.
+  deploy:
+    needs: provision
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: ${{ fromJson(needs.provision.outputs.matrix) }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PR_NUMBER: ${{ github.event.number }}
+      PREVIEW_IDS: ${{ needs.provision.outputs.ids }}
+      WORKER: ${{ matrix.worker }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bunx deploy-sdk deploy
+      - uses: actions/upload-artifact@v7
+        with:
+          name: url-${{ matrix.worker }}
+          path: .preview/url-${{ matrix.worker }}.txt
+          if-no-files-found: error
+
+  # Stage 3: resolve URL → consumer smoke → finalni komentar.
+  smoke:
+    needs: [provision, deploy]
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: url-*
+          path: urls
+          merge-multiple: true
+      - id: urls
+        env:
+          ENTRYPOINT: ${{ needs.provision.outputs.entrypoint }}
+          ENTRYPOINT_URL_DET: ${{ needs.provision.outputs.entrypointUrl }}
+        run: |
+          json='{}'
+          table=''
+          for f in urls/url-*.txt; do
+            base=$(basename "$f" .txt); base=${base#url-}
+            u=$(cat "$f")
+            json=$(printf '%s' "$json" | jq --arg b "$base" --arg u "$u" '. + {($b): $u}')
+            table="${table}| ${base} | ${u} |"$'\n'
+          done
+          ep="$ENTRYPOINT_URL_DET"
+          [ -z "$ep" ] && ep=$(cat "urls/url-${ENTRYPOINT}.txt")
+          {
+            echo "worker_urls=$(printf '%s' "$json" | jq -c .)"
+            echo "entrypoint_url=$ep"
+            echo "table<<TABLE_EOF"; printf '%s' "$table"; echo "TABLE_EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Smoke check (consumer-provided)
+        env:
+          ENTRYPOINT_URL: ${{ steps.urls.outputs.entrypoint_url }}
+          WORKER_URLS: ${{ steps.urls.outputs.worker_urls }}
+          ENVIRONMENT_EXPECTED: preview
+        run: bash "${SMOKE_SCRIPT:-scripts/smoke.sh}"
+
+      - if: success()
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: preview
+          message: |
+            ### 🚀 Preview pro PR #${{ github.event.number }}
+
+            Entrypoint: ${{ steps.urls.outputs.entrypoint_url }}
+
+            | Worker | URL |
+            |---|---|
+            ${{ steps.urls.outputs.table }}
+
+      - if: failure()
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: preview
+          message: |
+            ### ❌ Preview pro PR #${{ github.event.number }} selhal
+            Deploy nebo smoke check neprošel. [Detail běhu](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PR_NUMBER: ${{ github.event.number }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bunx deploy-sdk cleanup
+      - uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: preview
+          message: |
+            ### 🧹 Preview pro PR #${{ github.event.number }} smazán
