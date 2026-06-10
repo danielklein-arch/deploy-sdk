@@ -41,13 +41,10 @@ const topology: Topology = {
   },
 }
 
-const opts = (env: ReturnType<typeof resolveEnv>) => ({
+const opts = (env: ReturnType<typeof resolveEnv>, t: Topology = topology) => ({
   env,
   ids: { d1: {}, kv: {} },
-  previewZone: topology.previewZone,
-  secretsStoreId: topology.secretsStoreId,
-  compat: topology.compat,
-  sharedR2Resources: topology.sharedR2Resources,
+  topology: t,
 })
 
 const read = (path: string) => Bun.file(path).json()
@@ -134,6 +131,136 @@ test('render build worker: main = build output + assets binding', async () => {
   expect(cfg.assets).toEqual({ directory: '../apps/frontend/.output/public' })
 })
 
+// ── 0.6.0: suffix naming, domain šablony, queue config, vpc, limits, observability, version_metadata ──
+
+const namedTopology: Topology = {
+  ...topology,
+  naming: { prefix: 'dbu-txs-' },
+  d1Resources: ['order'],
+  environments: {
+    preview: {},
+    dev: {},
+    production: { branch: 'prod', suffix: '', workersDev: false },
+  },
+}
+
+test('naming mode: preview suffix -<pr>, dev -dev, production bare', () => {
+  const prev = resolveEnv(namedTopology, { preview: 1577 })
+  expect(prev.prefix).toBe('dbu-txs-')
+  expect(prev.suffix).toBe('-1577')
+  expect(prev.pr).toBe(1577)
+  const dev = resolveEnv(namedTopology, { stable: 'dev' })
+  expect(dev.suffix).toBe('-dev')
+  const prod = resolveEnv(namedTopology, { stable: 'prod' }) // branch mapping
+  expect(prod.key).toBe('production')
+  expect(prod.suffix).toBe('')
+  expect(prod.workersDev).toBe(false)
+})
+
+test('naming mode render: jména zdrojů dbu-txs-<base><suffix>, workers_dev z env', async () => {
+  const w: WorkerDescriptor = {
+    base: 'order-service',
+    dir: 'services/order',
+    main: 'i.ts',
+    services: [{ binding: 'SS', target: 'secrets-store' }],
+    d1: [{ binding: 'ORDER_D1', resource: 'order' }],
+    queueProducers: [{ binding: 'Q', resource: 'notifications' }],
+    deployOrder: 0,
+  }
+  const t = { ...namedTopology, workers: [w] }
+  const prev = await read(await renderConfig(w, opts(resolveEnv(t, { preview: 7 }), t)))
+  expect(prev.name).toBe('dbu-txs-order-service-7')
+  expect(prev.services).toContainEqual({ binding: 'SS', service: 'dbu-txs-secrets-store-7' })
+  expect(prev.d1_databases[0].database_name).toBe('dbu-txs-order-7')
+  expect(prev.queues.producers[0].queue).toBe('dbu-txs-notifications-7')
+  const prod = await read(await renderConfig(w, opts(resolveEnv(t, { stable: 'production' }), t)))
+  expect(prod.name).toBe('dbu-txs-order-service')
+  expect(prod.d1_databases[0].database_name).toBe('dbu-txs-order')
+  expect(prod.workers_dev).toBe(false)
+})
+
+test('domainsByEnv: {pr} placeholder + per-env, priorita env.domains > šablona', async () => {
+  const gw: WorkerDescriptor = {
+    base: 'gateway',
+    dir: 'apps/gateway',
+    main: 'i.ts',
+    customDomain: true,
+    domainsByEnv: {
+      preview: '{pr}.api.dbutxs.develit.dev',
+      dev: 'dev.api.dbutxs.develit.dev',
+      production: 'api.txs.devizovaburza.cz',
+    },
+    deployOrder: 1,
+  }
+  const t = { ...namedTopology, workers: [gw] }
+  const prev = await read(await renderConfig(gw, opts(resolveEnv(t, { preview: 42 }), t)))
+  expect(prev.routes).toEqual([{ pattern: '42.api.dbutxs.develit.dev', custom_domain: true }])
+  const prod = await read(await renderConfig(gw, opts(resolveEnv(t, { stable: 'production' }), t)))
+  expect(prod.routes).toEqual([{ pattern: 'api.txs.devizovaburza.cz', custom_domain: true }])
+  // env.domains override vyhrává nad šablonou
+  const t2 = {
+    ...t,
+    environments: { ...t.environments, production: { ...t.environments.production, domains: { gateway: 'override.cz' } } },
+  }
+  const ovr = await read(await renderConfig(gw, opts(resolveEnv(t2, { stable: 'production' }), t2)))
+  expect(ovr.routes).toEqual([{ pattern: 'override.cz', custom_domain: true }])
+})
+
+test('queue consumer config: batch/timeout/retries bez DLQ i s DLQ', async () => {
+  const w: WorkerDescriptor = {
+    base: 'c',
+    dir: 'c',
+    main: 'i.ts',
+    queueConsumers: [
+      { resource: 'audit-logs', batchSize: 100 }, // bez retries/DLQ
+      { resource: 'queue-bus', maxRetries: 3 }, // retries bez DLQ
+      { resource: 'notifications', batchSize: 1, deadLetter: { resource: 'notifications-dlq', maxRetries: 5 } },
+    ],
+    deployOrder: 0,
+  }
+  const cfg = await read(await renderConfig(w, opts(resolveEnv(topology, { preview: 9 }))))
+  const [audit, bus, notif] = cfg.queues.consumers
+  expect(audit).toEqual({ queue: 'pr-9-audit-logs', max_batch_size: 100, max_batch_timeout: 5 })
+  expect(bus).toEqual({ queue: 'pr-9-queue-bus', max_batch_size: 10, max_batch_timeout: 5, max_retries: 3 })
+  expect(notif).toEqual({
+    queue: 'pr-9-notifications',
+    max_batch_size: 1,
+    max_batch_timeout: 5,
+    max_retries: 5,
+    dead_letter_queue: 'pr-9-notifications-dlq',
+  })
+})
+
+test('vpcServices: per-env service_id, chybějící env → throw', async () => {
+  const w: WorkerDescriptor = {
+    base: 'bank',
+    dir: 'b',
+    main: 'i.ts',
+    vpcServices: [{ binding: 'CBS', serviceIdByEnv: { preview: 'id-dev', production: 'id-prod' } }],
+    deployOrder: 0,
+  }
+  const cfg = await read(await renderConfig(w, opts(resolveEnv(topology, { preview: 2 }))))
+  expect(cfg.vpc_services).toEqual([{ binding: 'CBS', service_id: 'id-dev', remote: true }])
+  const env = resolveEnv(topology, { stable: 'prod' }) // key 'prod' nemá id
+  expect(renderConfig(w, opts(env))).rejects.toThrow("chybí service_id pro env 'prod'")
+})
+
+test('workflow limits + version_metadata + observability', async () => {
+  const w: WorkerDescriptor = {
+    base: 'bank',
+    dir: 'b',
+    main: 'i.ts',
+    workflows: [{ binding: 'SYNC', name: 'bank-sync', className: 'Sync', limits: { steps: 25000 } }],
+    versionMetadata: 'CF_VERSION_METADATA',
+    deployOrder: 0,
+  }
+  const t = { ...topology, observability: { enabled: true, head_sampling_rate: 1 } }
+  const cfg = await read(await renderConfig(w, opts(resolveEnv(t, { preview: 3 }), t)))
+  expect(cfg.workflows[0].limits).toEqual({ steps: 25000 })
+  expect(cfg.version_metadata).toEqual({ binding: 'CF_VERSION_METADATA' })
+  expect(cfg.observability).toEqual({ enabled: true, head_sampling_rate: 1 })
+})
+
 test('lint: sensitive flat var + flat/perEnv kolize; ACCOUNT_ID NEhlásí', () => {
   const lintTopo: Topology = {
     ...topology,
@@ -177,4 +304,14 @@ test('lint: duplicitní service binding (services + externalServices) → warnin
     ],
   }
   expect(lintTopology(t).some((w) => w.includes("'MDM_GATEWAY'") && w.includes('kolize'))).toBe(true)
+})
+
+test('parsePr: legacy prefix vs naming suffix mode', async () => {
+  const { parsePr } = await import('./prefix')
+  expect(parsePr('pr-123-gateway', topology)).toBe(123)
+  expect(parsePr('dev-gateway', topology)).toBe(null)
+  expect(parsePr('dbu-txs-order-1577', namedTopology)).toBe(1577)
+  expect(parsePr('dbu-txs-order-dev', namedTopology)).toBe(null) // stable suffix nematchuje
+  expect(parsePr('dbu-txs-order', namedTopology)).toBe(null) // production bare
+  expect(parsePr('other-project-55', namedTopology)).toBe(null) // cizí prefix
 })

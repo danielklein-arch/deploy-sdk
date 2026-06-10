@@ -11,7 +11,7 @@ import {
   deployOne,
   migrateOne,
   entrypointInfo,
-  cleanupPrefix,
+  cleanupEnv,
   gc,
   lintTopology,
   type Topology,
@@ -157,7 +157,7 @@ switch (cmd) {
     const topology = await loadTopology(topoPath)
     const env = resolveDeployEnv(topology) // aktivuje per-env account/token
     const accountId = requireAccount()
-    const { failures } = await cleanupPrefix(env.prefix, topology, { accountId, apiToken: await resolveCfToken() })
+    const { failures } = await cleanupEnv(env, topology, { accountId, apiToken: await resolveCfToken() })
     if (failures.length) {
       console.error(`\n[cleanup] ✗ ${failures.length} zdrojů se nepodařilo smazat:`)
       for (const f of failures) console.error(`  - ${f}`)

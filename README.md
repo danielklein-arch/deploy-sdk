@@ -45,8 +45,15 @@ await gc(topology, openPrNumbers, ctx, { apply })             // orphan cleanup 
 
 ## Stav
 
-`0.5.0` — extrahováno z `dbu-txs-preview-lab` (referenční consumer: lab + `examples/minimal-app`).
-0.5.0: branch→env mapping, per-env `secretsStoreId`, `migrate` příkaz + `migrateOne`.
+`0.6.0` — extrahováno z `dbu-txs-preview-lab` (referenční consumer: lab + `examples/minimal-app`).
+- 0.6.0 (dbu-txs migration readiness): **suffix naming mode** (`topology.naming.prefix` → jména
+  `dbu-txs-order-1577`/`-dev`/`-staging`/bare production; `EnvConfig.suffix`, suffix-aware `parsePr`/gc),
+  **domain šablony** (`WorkerDescriptor.domainsByEnv`, `{pr}` placeholder), **queue consumer config**
+  (batchSize/batchTimeout/maxRetries i bez DLQ), **`migrateCommand`** (drizzle-kit aj.; env dostane
+  ENVIRONMENT + `D1_ID_<BINDING>`/`D1_NAME_<BINDING>`), **`vpcServices`** (per-env service_id),
+  workflow `limits`, `observability`, `version_metadata`, per-env `workersDev` toggle.
+  `cleanupPrefix` → `cleanupEnv(env, …)`.
+- 0.5.0: branch→env mapping, per-env `secretsStoreId`, `migrate` příkaz + `migrateOne`.
 
 ## Build
 

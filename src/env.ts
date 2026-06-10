@@ -3,6 +3,9 @@ import type { Topology, DeployEnv, EnvConfig } from './types'
 
 export type EnvSelector = { preview: number } | { stable: string }
 
+// Finální jméno zdroje/workeru pro env. Legacy: `${prefix}${base}`; naming mode: `${prefix}${base}${suffix}`.
+export const nameFor = (env: DeployEnv, base: string): string => `${env.prefix}${base}${env.suffix}`
+
 // Stable lookup: přímý klíč → fallback scan podle EnvConfig.branch (branch 'prod' → env 'production').
 function findStable(topology: Topology, name: string): { key: string; cfg: EnvConfig } {
   const direct = topology.environments[name]
@@ -13,14 +16,18 @@ function findStable(topology: Topology, name: string): { key: string; cfg: EnvCo
 }
 
 export function resolveEnv(topology: Topology, sel: EnvSelector): DeployEnv {
+  const naming = topology.naming
   if ('preview' in sel) {
     // Preview může mít env-level defaulty přes topology.environments.preview (sandbox vars/secrets/domains).
-    // Prefix zůstává per-PR `pr-<N>-` (ephemeral); previewCfg.prefix se ignoruje.
+    // Per-PR identita: legacy prefix `pr-<N>-`, naming mode suffix `-<N>`.
     const previewCfg = topology.environments.preview
     return {
       name: `pr-${sel.preview}`,
       key: 'preview',
-      prefix: `pr-${sel.preview}-`,
+      prefix: naming ? naming.prefix : `pr-${sel.preview}-`,
+      suffix: naming ? `-${sel.preview}` : '',
+      pr: sel.preview,
+      workersDev: previewCfg?.workersDev ?? true,
       ephemeral: true,
       vars: { ENVIRONMENT: 'preview', ...previewCfg?.vars },
       domains: previewCfg?.domains ?? {},
@@ -34,7 +41,9 @@ export function resolveEnv(topology: Topology, sel: EnvSelector): DeployEnv {
   return {
     name: key,
     key,
-    prefix: cfg.prefix ?? `${key}-`,
+    prefix: naming ? naming.prefix : (cfg.prefix ?? `${key}-`),
+    suffix: naming ? (cfg.suffix ?? `-${key}`) : '',
+    workersDev: cfg.workersDev ?? true,
     ephemeral: false,
     vars: { ENVIRONMENT: key, ...cfg.vars },
     domains: cfg.domains ?? {},
@@ -45,6 +54,16 @@ export function resolveEnv(topology: Topology, sel: EnvSelector): DeployEnv {
   }
 }
 
-// Custom-domain FQDN workeru: env override (prod apex) nebo default `${prefix}${base}.${zone}`.
-export const resolveDomain = (env: DeployEnv, base: string, previewZone: string): string =>
-  env.domains[base] ?? `${env.prefix}${base}.${previewZone}`
+// Custom-domain FQDN workeru. Priorita: env override (prod apex) → per-worker šablona
+// (domainsByEnv[env.key], `{pr}` placeholder) → default `${nameFor}.${previewZone}`.
+export function resolveDomain(env: DeployEnv, base: string, topology: Topology): string {
+  const override = env.domains[base]
+  if (override) return override
+  const tpl = topology.workers.find((w) => w.base === base)?.domainsByEnv?.[env.key]
+  if (tpl) {
+    if (tpl.includes('{pr}') && env.pr === undefined)
+      throw new Error(`domainsByEnv '${base}'/'${env.key}': '{pr}' placeholder mimo preview env`)
+    return tpl.replaceAll('{pr}', String(env.pr))
+  }
+  return `${nameFor(env, base)}.${topology.previewZone}`
+}

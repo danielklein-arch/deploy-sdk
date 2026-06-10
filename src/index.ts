@@ -19,8 +19,9 @@ export type {
 } from './types'
 
 export { provision, deployOne, migrateOne, prefixFor, parsePrefix, entrypointInfo } from './engine'
-export { resolveEnv, resolveDomain, type EnvSelector } from './env'
-export { cleanupPrefix, type CleanupResult, type CleanupCtx } from './cleanup'
+export { parsePr } from './prefix'
+export { resolveEnv, resolveDomain, nameFor, type EnvSelector } from './env'
+export { cleanupEnv, type CleanupResult, type CleanupCtx } from './cleanup'
 export { gc, type GcOpts, type GcResult } from './gc'
 export { renderConfig, type RenderOpts } from './render-config'
 export { lintTopology } from './lint'

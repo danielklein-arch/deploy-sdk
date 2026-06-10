@@ -129,16 +129,17 @@ export async function applyD1Migrations(dbName: string, configPath: string): Pro
 
 // Retry na 10143 (service binding cíl ještě nenasazený) — plně paralelní matrix deployuje
 // workery v nedeterministickém pořadí; cíl se doregistruje za pár sekund.
+// requireUrl=false (workers_dev vypnutý) → úspěšný deploy bez workers.dev URL vrací ''.
 export async function deployWorker(
   configPath: string,
-  opts: { retries?: number; log?: Logger } = {},
+  opts: { retries?: number; log?: Logger; requireUrl?: boolean } = {},
 ): Promise<string> {
-  const { retries = 5, log = consoleLogger } = opts
+  const { retries = 5, log = consoleLogger, requireUrl = true } = opts
   for (let attempt = 0; ; attempt++) {
     const res = await $`bunx wrangler deploy -c ${configPath}`.quiet().nothrow()
     const out = res.stdout.toString() + res.stderr.toString()
     const m = out.match(/https:\/\/[^\s]+\.workers\.dev/)
-    if (res.exitCode === 0 && m) return m[0]
+    if (res.exitCode === 0 && (m || !requireUrl)) return m?.[0] ?? ''
     // Jen kód 10143 (CF ho spolehlivě připne k „service binding target not found"). Generický
     // text „which was not found" by maskoval i permanentní chyby (překlep v názvu) → 50s zbytečných retry.
     const targetNotReady = /code: 10143/.test(out)
@@ -147,8 +148,8 @@ export async function deployWorker(
       await new Promise((r) => setTimeout(r, 10_000))
       continue
     }
-    assert(res.exitCode === 0 && m, `deploy selhal:\n${out}`)
-    return m![0]
+    assert(res.exitCode === 0 && (m || !requireUrl), `deploy selhal:\n${out}`)
+    return m?.[0] ?? ''
   }
 }
 

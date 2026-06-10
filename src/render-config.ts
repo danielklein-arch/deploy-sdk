@@ -1,62 +1,59 @@
 // Render ephemerálního wrangler configu pro JEDEN worker z topology descriptoru + resolved env + ids.
-// Čistá funkce (žádné process.env). env (DeployEnv) řídí prefix/domény/vars/secrets per prostředí.
-import type { WorkerDescriptor, DeployEnv } from './types'
+// Čistá funkce (žádné process.env). env (DeployEnv) řídí jména/domény/vars/secrets per prostředí.
+import type { Topology, WorkerDescriptor, DeployEnv } from './types'
 import type { Ids } from './cf-client'
-import { resolveDomain } from './env'
+import { nameFor, resolveDomain } from './env'
 
 const PREVIEW_DIR = '.preview'
 
 // Resolved vars workeru pro daný env (sdílené renderem i build hookem → SPA build dostane stejné NUXT_PUBLIC_*).
 // Precedence: env-level < worker flat < per-worker per-env override; + injektnutá custom-domain URL jiného workeru.
-export function computeVars(w: WorkerDescriptor, env: DeployEnv, previewZone: string): Record<string, string> {
+export function computeVars(w: WorkerDescriptor, env: DeployEnv, topology: Topology): Record<string, string> {
   const vars: Record<string, string> = { ...env.vars, ...w.vars, ...(w.varsByEnv?.[env.key] ?? {}) }
-  if (w.injectUrlOf) vars[w.injectUrlOf.var] = `https://${resolveDomain(env, w.injectUrlOf.worker, previewZone)}`
+  if (w.injectUrlOf) vars[w.injectUrlOf.var] = `https://${resolveDomain(env, w.injectUrlOf.worker, topology)}`
   return vars
 }
 
-export type RenderOpts = {
-  env: DeployEnv
-  ids: Ids
-  previewZone: string // zóna pro default custom domény
-  secretsStoreId: string // CF Secrets Store id (account-specific → injektuje volající)
-  compat: { date: string; flags: string[] } // compatibility_date + flags (consumer policy)
-  sharedR2Resources?: readonly string[] // shared buckety (preview kolabuje na `preview-`, neteardownují se)
-}
+export type RenderOpts = { env: DeployEnv; ids: Ids; topology: Topology }
 
 // Vrací cestu k zapsanému `.preview/<base>.json`. Async — write se musí flushnout, než cestu
 // předáme wrangleru (jinak read-after-write race).
-export async function renderConfig(
-  w: WorkerDescriptor,
-  { env, ids, previewZone, secretsStoreId, compat, sharedR2Resources }: RenderOpts,
-): Promise<string> {
-  const p = env.prefix
-  const sharedR2 = new Set(sharedR2Resources ?? [])
-  // Shared bucket: preview všech PR sdílí `preview-${r}`; stable = `${prefix}${r}`. Non-shared = per-PR `${prefix}${r}`.
+export async function renderConfig(w: WorkerDescriptor, { env, ids, topology }: RenderOpts): Promise<string> {
+  const name = (base: string): string => nameFor(env, base)
+  const sharedR2 = new Set(topology.sharedR2Resources ?? [])
+  // Shared bucket: preview všech PR sdílí `preview-${r}`; stable = per-env jméno. Non-shared = per-env/PR jméno.
   const bucketName = (resource: string): string =>
-    sharedR2.has(resource) ? `${env.ephemeral ? 'preview-' : p}${resource}` : `${p}${resource}`
+    sharedR2.has(resource) ? (env.ephemeral ? `preview-${resource}` : name(resource)) : name(resource)
   const cfg: Record<string, unknown> = {
-    name: `${p}${w.base}`,
+    name: name(w.base),
     // build worker → entry = built output (např. .output/server/index.mjs), jinak src. Cesta relativní k .preview/.
     main: `../${w.dir}/${w.build?.main ?? w.main}`,
-    compatibility_date: compat.date,
-    compatibility_flags: compat.flags,
-    workers_dev: true,
+    compatibility_date: topology.compat.date,
+    compatibility_flags: topology.compat.flags,
+    workers_dev: env.workersDev,
   }
+  if (topology.observability) cfg.observability = topology.observability
   // Static assets (Nuxt .output/public) — wrangler je servíruje, SSR worker je fallback.
   if (w.build?.assets) cfg.assets = { directory: `../${w.dir}/${w.build.assets}` }
   const services = [
-    ...(w.services?.map((s) => ({ binding: s.binding, service: `${p}${s.target}` })) ?? []),
+    ...(w.services?.map((s) => ({ binding: s.binding, service: name(s.target) })) ?? []),
     ...(w.externalServices?.map((s) => {
-      const name = s.namesByEnv[env.key]
-      if (!name) throw new Error(`external service '${s.binding}': chybí jméno pro env '${env.key}'`)
-      return { binding: s.binding, service: name } // literální jméno, BEZ prefixu
+      const n = s.namesByEnv[env.key]
+      if (!n) throw new Error(`external service '${s.binding}': chybí jméno pro env '${env.key}'`)
+      return { binding: s.binding, service: n } // literální jméno, BEZ prefixu
     }) ?? []),
   ]
   if (services.length) cfg.services = services
+  if (w.vpcServices?.length)
+    cfg.vpc_services = w.vpcServices.map((v) => {
+      const id = v.serviceIdByEnv[env.key]
+      if (!id) throw new Error(`vpc service '${v.binding}': chybí service_id pro env '${env.key}'`)
+      return { binding: v.binding, service_id: id, remote: v.remote ?? true }
+    })
   if (w.d1?.length)
     cfg.d1_databases = w.d1.map((d) => ({
       binding: d.binding,
-      database_name: `${p}${d.resource}`,
+      database_name: name(d.resource),
       database_id: ids.d1[d.resource],
       migrations_dir: `../${w.dir}/migrations`,
     }))
@@ -65,7 +62,7 @@ export async function renderConfig(
   if (w.secretsStore?.length)
     cfg.secrets_store_secrets = w.secretsStore.map((s) => ({
       binding: s.binding,
-      store_id: secretsStoreId,
+      store_id: env.secretsStoreId,
       // per-env secret name override, jinak descriptor default
       secret_name: env.secrets[s.binding] ?? s.secretName,
     }))
@@ -79,25 +76,24 @@ export async function renderConfig(
   if (w.workflows?.length)
     cfg.workflows = w.workflows.map((wf) => ({
       binding: wf.binding,
-      name: `${p}${wf.name}`, // cloud-side název je per-env → cleanup maže podle něj
+      name: name(wf.name), // cloud-side název je per-env → cleanup maže podle něj
       class_name: wf.className,
+      ...(wf.limits && { limits: wf.limits }),
     }))
+  if (w.versionMetadata) cfg.version_metadata = { binding: w.versionMetadata }
   if (w.crons?.length) cfg.triggers = { crons: w.crons }
-  if (w.customDomain)
-    cfg.routes = [{ pattern: resolveDomain(env, w.base, previewZone), custom_domain: true }]
-  const producers = w.queueProducers?.map((q) => ({ binding: q.binding, queue: `${p}${q.resource}` }))
+  if (w.customDomain) cfg.routes = [{ pattern: resolveDomain(env, w.base, topology), custom_domain: true }]
+  const producers = w.queueProducers?.map((q) => ({ binding: q.binding, queue: name(q.resource) }))
   const consumers = w.queueConsumers?.map((q) => ({
-    queue: `${p}${q.resource}`,
-    max_batch_size: 10,
-    max_batch_timeout: 5,
-    ...(q.deadLetter && {
-      dead_letter_queue: `${p}${q.deadLetter.resource}`,
-      max_retries: q.deadLetter.maxRetries,
-    }),
+    queue: name(q.resource),
+    max_batch_size: q.batchSize ?? 10,
+    max_batch_timeout: q.batchTimeout ?? 5,
+    ...((q.maxRetries ?? q.deadLetter) && { max_retries: q.maxRetries ?? q.deadLetter?.maxRetries }),
+    ...(q.deadLetter && { dead_letter_queue: name(q.deadLetter.resource) }),
   }))
   if (producers?.length || consumers?.length)
     cfg.queues = { ...(producers?.length && { producers }), ...(consumers?.length && { consumers }) }
-  const vars = computeVars(w, env, previewZone)
+  const vars = computeVars(w, env, topology)
   if (Object.keys(vars).length) cfg.vars = vars
 
   const path = `${PREVIEW_DIR}/${w.base}.json`

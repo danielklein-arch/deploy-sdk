@@ -1,9 +1,11 @@
-// Garbage-collect osiřelých preview prefixů. Čistá logika: enumerace pr-<N>-* napříč typy +
-// určení osiřelých (PR co NENÍ otevřený) + cleanup. Seznam otevřených PR dodá volající (gh).
+// Garbage-collect osiřelých preview envů. Čistá logika: enumerace per-PR zdrojů napříč typy
+// (legacy `pr-<N>-*` / naming mode `<prefix>*-<N>`) + určení osiřelých (PR co NENÍ otevřený) + cleanup.
+// Seznam otevřených PR dodá volající (gh).
 // POZN.: otevřený PR už NIKDY není orphan (žádný TTL/auto-teardown) — to byl explicit feedback.
 import type { Topology } from './types'
-import { cleanupPrefix } from './cleanup'
-import { prefixFor, parsePrefix } from './prefix'
+import { cleanupEnv } from './cleanup'
+import { resolveEnv } from './env'
+import { parsePr } from './prefix'
 import {
   workersList,
   d1List,
@@ -23,8 +25,8 @@ export type GcResult = {
   failures: Record<number, string[]> // pr → labely nesmazaných zdrojů
 }
 
-// Posbírá PR čísla ze VŠECH existujících `pr-<N>-*` zdrojů (napříč typy).
-async function enumeratePrNumbers(ctx: CfCtx): Promise<Set<number>> {
+// Posbírá PR čísla ze VŠECH existujících per-PR zdrojů (napříč typy).
+async function enumeratePrNumbers(topology: Topology, ctx: CfCtx): Promise<Set<number>> {
   const names = [
     ...(await workersList(ctx)),
     ...(await d1List()).map((d) => d.name),
@@ -34,7 +36,7 @@ async function enumeratePrNumbers(ctx: CfCtx): Promise<Set<number>> {
   ]
   const prNums = new Set<number>()
   for (const n of names) {
-    const pr = parsePrefix(n)
+    const pr = parsePr(n, topology)
     if (pr !== null) prNums.add(pr)
   }
   return prNums
@@ -47,7 +49,7 @@ export async function gc(
   opts: GcOpts,
 ): Promise<GcResult> {
   const log = opts.log ?? consoleLogger
-  const prNums = await enumeratePrNumbers(ctx)
+  const prNums = await enumeratePrNumbers(topology, ctx)
   const open = new Set(openPrNumbers)
 
   // Orphan = existující prefix bez odpovídajícího OTEVŘENÉHO PR (zavřený / smazaná branch / závod).
@@ -55,7 +57,11 @@ export async function gc(
 
   const failures: Record<number, string[]> = {}
   for (const pr of orphans) {
-    const r = await cleanupPrefix(prefixFor(pr), topology, { ...ctx, dryRun: !opts.apply, log })
+    const r = await cleanupEnv(resolveEnv(topology, { preview: pr }), topology, {
+      ...ctx,
+      dryRun: !opts.apply,
+      log,
+    })
     if (r.failures.length) failures[pr] = r.failures
   }
 

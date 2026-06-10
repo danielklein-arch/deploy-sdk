@@ -8,12 +8,23 @@ export type ExternalServiceBinding = { binding: string; namesByEnv: Record<strin
 export type D1Binding = { binding: string; resource: string } // resource = base name DB
 export type KvBinding = { binding: string; resource: string }
 export type QueueProducer = { binding: string; resource: string }
-// deadLetter.resource = base name DLQ queue (musí být v queueResources → ensure/cleanup)
-export type QueueConsumer = { resource: string; deadLetter?: { resource: string; maxRetries: number } }
+// Consumer config per queue (dbu-txs: notifications batch=1+DLQ, audit-logs batch=100, queue-bus retries=3).
+// deadLetter.resource = base name DLQ queue (musí být v queueResources → ensure/cleanup).
+// maxRetries funguje i BEZ deadLetter; default batchSize=10, batchTimeout=5.
+export type QueueConsumer = {
+  resource: string
+  batchSize?: number
+  batchTimeout?: number
+  maxRetries?: number
+  deadLetter?: { resource: string; maxRetries: number }
+}
 export type R2Binding = { binding: string; resource: string } // resource = base name bucketu
 export type SecretStoreBinding = { binding: string; secretName: string } // secretName = jméno v CF Secrets Store
 export type DurableObjectBinding = { binding: string; className: string } // className = exportovaná DO třída
-export type WorkflowBinding = { binding: string; name: string; className: string } // name = base, prefix přidán za běhu
+// limits.steps: per-workflow override (dbu-txs bank sync = 25000)
+export type WorkflowBinding = { binding: string; name: string; className: string; limits?: { steps?: number } }
+// VPC service binding (dbu-txs bank → CBS backoffice). service_id per env, neprovisionuje/necleanupuje se.
+export type VpcServiceBinding = { binding: string; serviceIdByEnv: Record<string, string>; remote?: boolean }
 // Build-before-deploy (Nuxt apod.): deploy spustí `command`, pak deployuje built output místo src.
 // main = entry buildu (relativní k worker dir, např. `.output/server/index.mjs`),
 // assets = static dir (relativní k worker dir, např. `.output/public`) → wrangler assets binding.
@@ -26,6 +37,7 @@ export type WorkerDescriptor = {
   build?: BuildSpec // build-before-deploy (Nuxt) → deployuje built output + assets, ne src
   services?: ServiceBinding[]
   externalServices?: ExternalServiceBinding[] // bindingy na workery mimo topologii (per-env literální jméno)
+  vpcServices?: VpcServiceBinding[]
   d1?: D1Binding[]
   kv?: KvBinding[]
   r2?: R2Binding[]
@@ -44,6 +56,14 @@ export type WorkerDescriptor = {
   injectUrlOf?: { var: string; worker: string }
   // custom domain `${prefix}${base}.${topology.previewZone}` (řeší worker→worker fetch; workers.dev hází CF 1042)
   customDomain?: boolean
+  // Per-env FQDN šablona workeru, `{pr}` placeholder pro preview (dbu-txs: preview '{pr}.api.dbutxs.develit.dev',
+  // dev 'dev.api.dbutxs.develit.dev', production 'api.txs.devizovaburza.cz'). Priorita: env.domains > tohle > default.
+  domainsByEnv?: Record<string, string>
+  // Custom migrate command (drizzle-kit apod.) — `migrate`/deployOne ho spustí MÍSTO `wrangler d1 migrations apply`.
+  // Env dostane ENVIRONMENT + D1_ID_<BINDING>/D1_NAME_<BINDING> pro každý d1 binding workeru.
+  migrateCommand?: string
+  // version_metadata binding (CF_VERSION_METADATA u dbu-txs gateway/frontend)
+  versionMetadata?: string
   // pořadí deploye: nižší dřív (services 0 → gateway 1 → frontend 2). Pozn.: plně paralelní matrix
   // pořadí nevynucuje (deployWorker retry-uje 10143); deployOrder používá jen lokální sériový wrapper.
   deployOrder: number
@@ -61,7 +81,12 @@ export type Topology = {
   sharedR2Resources?: readonly string[]
   previewZone: string // zóna pro per-PR custom domény (gateway)
   secretsStoreId: string // CF Secrets Store id (account-specific)
+  // Suffix naming mode (dbu-txs): jména = `${naming.prefix}${base}${suffix}` — preview `dbu-txs-order-1577`,
+  // dev `-dev`, staging `-staging`, production '' (EnvConfig.suffix). Bez naming = legacy prefix mode (`pr-N-order`).
+  naming?: { prefix: string }
   compat: { date: string; flags: string[] } // compatibility_date + flags (consumer policy, ne engine)
+  // observability blok pro všechny workery (dbu-txs: { enabled: true, head_sampling_rate: 1 }). Default: žádný.
+  observability?: Record<string, unknown>
   // base name veřejného workeru (cíl smoke/komentáře). Single-worker projekt = ten jediný worker.
   entrypoint: string
   // Stálá prostředí (dev/staging/prod). Previews jsou odvozené (ephemeral, prefix pr-<N>-).
@@ -70,10 +95,14 @@ export type Topology = {
 
 // Per-prostředí konfigurace stálého env (dev/staging/prod).
 export type EnvConfig = {
-  prefix?: string // resource prefix; default `${name}-`
+  prefix?: string // resource prefix (legacy mode); default `${name}-`
+  // Suffix v naming mode (`topology.naming`); default `-${key}`. Production = '' (bare jména s živými daty).
+  suffix?: string
   // Git branch mapující na tento env, když se jméno liší (branch 'prod' → env 'production').
   // resolveEnv: přímý klíč má přednost, pak scan podle branch.
   branch?: string
+  // workers_dev toggle (default true). dbu-txs stable = false (jen custom domains).
+  workersDev?: boolean
   // Per-env CF Secrets Store id (multi-account: každý account má vlastní store). Fallback topology.secretsStoreId.
   secretsStoreId?: string
   vars?: Record<string, string> // env-level vars do VŠECH workerů (ENVIRONMENT se přidá automaticky)
@@ -89,9 +118,12 @@ export type EnvConfig = {
 
 // Vyřešené prostředí (preview nebo stable) — engine podle něj renderuje. Pure data.
 export type DeployEnv = {
-  name: string // 'pr-123' | 'dev' | 'staging' | 'prod'
-  key: string // lookup klíč pro varsByEnv / externalServices: 'preview' | stable name ('dev'|'staging'|'prod')
-  prefix: string // 'pr-123-' | 'dev-' | …
+  name: string // 'pr-123' | 'dev' | 'staging' | 'production'
+  key: string // lookup klíč pro varsByEnv / externalServices: 'preview' | stable name ('dev'|'staging'|'production')
+  prefix: string // legacy: 'pr-123-' | 'dev-'; naming mode: projektový prefix ('dbu-txs-')
+  suffix: string // naming mode: '-1577' | '-dev' | '' ; legacy: ''
+  pr?: number // PR číslo (jen preview) — pro `{pr}` placeholder v domainsByEnv
+  workersDev: boolean // workers_dev v configu (default true)
   ephemeral: boolean // preview=true (teardown), stable=false (persistuje)
   vars: Record<string, string> // env vars merge do všech workerů (vč. ENVIRONMENT)
   domains: Record<string, string> // base → FQDN override (custom-domain workery)
