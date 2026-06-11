@@ -28,7 +28,7 @@ function fail(msg: string): never {
 function usage(): never {
   fail(`deploy-sdk <command> [-t topology]
 
-  provision              ensure sdílených zdrojů → emit ids/matrix/entrypoint/entrypointUrl
+  provision              ensure sdílených zdrojů → emit ids/matrix/entrypoint/entrypointUrl/envKey
   deploy <worker>        deploy 1 workeru (PREVIEW_IDS env nebo --ids); zapíše .preview/url-<w>.txt
                          SKIP_MIGRATIONS=1 → přeskočí D1 migrace (stable: explicitní migrate krok)
   migrate                seriálně D1 migrace všech workerů s migrations/ (PREVIEW_IDS env nebo --ids)
@@ -124,7 +124,8 @@ switch (cmd) {
       `ids=${JSON.stringify(ids)}\n` +
         `matrix=${JSON.stringify(topology.workers.map((w) => w.base))}\n` +
         `entrypoint=${ep.base}\n` +
-        `entrypointUrl=${ep.url ?? ''}\n`,
+        `entrypointUrl=${ep.url ?? ''}\n` +
+        `envKey=${env.key}\n`,
     )
     break
   }

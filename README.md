@@ -88,17 +88,23 @@ Workflow ho zavolá po deployi s env:
 Minimální verze: `curl -fsS "$ENTRYPOINT_URL/health"`. Vzor s retry/DO/workflows checky:
 [lab `scripts/smoke.sh`](https://github.com/danielklein-arch/dbu-txs-preview-lab/blob/dev/scripts/smoke.sh).
 
-### 4. Workflows — zkopíruj šablony
+### 4. Workflows — tenké wrappery nad reusable workflows
+Orchestrace (provision → matrix deploy → smoke → cleanup/migrate) žije v reusable
+workflows tohoto repa ([`.github/workflows/preview.yaml`](.github/workflows/preview.yaml),
+[`.github/workflows/deploy-stable.yaml`](.github/workflows/deploy-stable.yaml)) — consumer má
+jen trigger + `uses:` + parametry:
 ```bash
 mkdir -p .github/workflows
 cp node_modules/@danielklein/deploy-sdk/templates/{preview,deploy-stable,gc-previews}.yml .github/workflows/
 ```
-- [`templates/preview.yml`](templates/preview.yml) — PR lifecycle (provision → matrix deploy → smoke → cleanup on close)
-- [`templates/deploy-stable.yml`](templates/deploy-stable.yml) — push do stable větví (CI gate → provision → **migrate** → deploy → smoke)
+- [`templates/preview.yml`](templates/preview.yml) — PR lifecycle wrapper (`uses: …/preview.yaml@v1`)
+- [`templates/deploy-stable.yml`](templates/deploy-stable.yml) — stable wrapper (ci-sdk gate + `uses: …/deploy-stable.yaml@v1`)
 - [`templates/gc-previews.yml`](templates/gc-previews.yml) — týdenní orphan GC (cron APPLY, manual dry-run)
 
-Uprav: trigger `branches`, `bun-version`, ci gate (`uses:` na tvůj CI), případně `SMOKE_SCRIPT`.
-CI doporučeně zvlášť v `ci.yml` jen na `pull_request` (push má gate embednutou v deploy-stable → žádná duplicita).
+Inputs reusable workflows: `env-passthrough` (CSV GH secrets → env pro topology vars),
+`smoke-script` (default `scripts/smoke.sh`), `bun-version`, `skip-migrate` (stable, projekty bez D1).
+Uprav: trigger `branches`, ci gate (`uses:` na tvůj CI).
+CI doporučeně zvlášť v `ci.yml` jen na `pull_request` (push má gate v deploy-stable wrapperu → žádná duplicita).
 
 ### 5. GitHub secrets
 ```bash

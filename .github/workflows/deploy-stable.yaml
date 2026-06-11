@@ -1,0 +1,183 @@
+name: deploy-sdk stable
+
+# Reusable stable deploy (workflow_call) — provision → migrate → deploy → smoke pro push
+# do stable vetvi. CI gate je consumer concern (job s ci-sdk + needs v jeho wrapperu):
+#
+#   on:
+#     push:
+#       branches: [dev, main]
+#   concurrency:
+#     group: stable-${{ github.ref_name }}
+#     cancel-in-progress: ${{ github.ref_name == 'dev' }}
+#   jobs:
+#     ci:
+#       uses: danielklein-arch/ci-sdk/.github/workflows/ci.yaml@v1
+#       secrets: inherit
+#     deploy:
+#       needs: ci
+#       uses: danielklein-arch/deploy-sdk/.github/workflows/deploy-stable.yaml@v1
+#       secrets: inherit
+#       with:
+#         env-passthrough: NUXT_ADMIN_MAIL,NUXT_NODEMAILER_AUTH_PASS
+on:
+  workflow_call:
+    inputs:
+      bun-version: { type: string, default: latest }
+      smoke-script: { type: string, default: scripts/smoke.sh }
+      # CSV jmen GH secrets, ktere se exportuji do env pred provision/deploy —
+      # topology.ts je cte pres process.env (vars workeru). Hodnoty se maskuji.
+      env-passthrough: { type: string, default: '' }
+      # Bez D1 (zadne migrace) → skip-migrate: true usetri job.
+      skip-migrate: { type: boolean, default: false }
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      ids: ${{ steps.p.outputs.ids }}
+      matrix: ${{ steps.p.outputs.matrix }}
+      entrypoint: ${{ steps.p.outputs.entrypoint }}
+      entrypointUrl: ${{ steps.p.outputs.entrypointUrl }}
+      envKey: ${{ steps.p.outputs.envKey }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STABLE_ENV: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - name: Env passthrough (topology vars)
+        if: inputs.env-passthrough != ''
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          KEYS: ${{ inputs.env-passthrough }}
+        run: |
+          for k in ${KEYS//,/ }; do
+            v=$(printf '%s' "$SECRETS_JSON" | jq -r --arg k "$k" '.[$k] // empty')
+            if [ -n "$v" ]; then
+              echo "::add-mask::$v"
+              printf '%s<<__EOF__\n%s\n__EOF__\n' "$k" "$v" >> "$GITHUB_ENV"
+            fi
+          done
+      - id: p
+        run: bunx deploy-sdk provision
+
+  # Explicitni pre-deploy migrace (serialne). Fail = deploy se vubec nespusti →
+  # zadny half-migrated + half-deployed stav. Vyzaduje additive (expand/contract) migrace.
+  migrate:
+    needs: provision
+    if: ${{ !inputs.skip-migrate }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STABLE_ENV: ${{ github.ref_name }}
+      PREVIEW_IDS: ${{ needs.provision.outputs.ids }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bunx deploy-sdk migrate
+
+  deploy:
+    needs: [provision, migrate]
+    # skip-migrate → migrate je skipped; needs.migrate.result musime tolerovat
+    if: ${{ !cancelled() && needs.provision.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: ${{ fromJson(needs.provision.outputs.matrix) }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STABLE_ENV: ${{ github.ref_name }}
+      PREVIEW_IDS: ${{ needs.provision.outputs.ids }}
+      WORKER: ${{ matrix.worker }}
+      SKIP_MIGRATIONS: '1' # migrace probehly v migrate jobu (nebo zadne nejsou)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - name: Env passthrough (topology vars)
+        if: inputs.env-passthrough != ''
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          KEYS: ${{ inputs.env-passthrough }}
+        run: |
+          for k in ${KEYS//,/ }; do
+            v=$(printf '%s' "$SECRETS_JSON" | jq -r --arg k "$k" '.[$k] // empty')
+            if [ -n "$v" ]; then
+              echo "::add-mask::$v"
+              printf '%s<<__EOF__\n%s\n__EOF__\n' "$k" "$v" >> "$GITHUB_ENV"
+            fi
+          done
+      - run: bunx deploy-sdk deploy
+      - uses: actions/upload-artifact@v7
+        with:
+          name: url-${{ matrix.worker }}
+          path: .preview/url-${{ matrix.worker }}.txt
+          if-no-files-found: error
+
+  smoke:
+    needs: [provision, deploy]
+    if: ${{ !cancelled() && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: url-*
+          path: urls
+          merge-multiple: true
+      - id: urls
+        env:
+          ENTRYPOINT: ${{ needs.provision.outputs.entrypoint }}
+          ENTRYPOINT_URL_DET: ${{ needs.provision.outputs.entrypointUrl }}
+        run: |
+          json='{}'
+          for f in urls/url-*.txt; do
+            base=$(basename "$f" .txt); base=${base#url-}
+            json=$(printf '%s' "$json" | jq --arg b "$base" --arg u "$(cat "$f")" '. + {($b): $u}')
+          done
+          ep="$ENTRYPOINT_URL_DET"
+          [ -z "$ep" ] && ep=$(cat "urls/url-${ENTRYPOINT}.txt")
+          {
+            echo "worker_urls=$(printf '%s' "$json" | jq -c .)"
+            echo "entrypoint_url=$ep"
+          } >> "$GITHUB_OUTPUT"
+      - name: Smoke check (consumer-provided)
+        env:
+          ENTRYPOINT_URL: ${{ steps.urls.outputs.entrypoint_url }}
+          WORKER_URLS: ${{ steps.urls.outputs.worker_urls }}
+          # env KEY z provision (branch→env mapping resi topology, ne YAML)
+          ENVIRONMENT_EXPECTED: ${{ needs.provision.outputs.envKey }}
+          SMOKE_SCRIPT: ${{ inputs.smoke-script }}
+        run: bash "$SMOKE_SCRIPT"
