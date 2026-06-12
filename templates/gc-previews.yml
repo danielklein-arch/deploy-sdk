@@ -38,6 +38,7 @@ jobs:
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       # package je gh-free → cisla otevrenych PR dodame z gh pres --open-prs
       - run: |
