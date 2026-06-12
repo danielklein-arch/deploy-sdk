@@ -404,3 +404,95 @@ test('parsePr: shared gateway preview-* není orphan (oba mody)', async () => {
   expect(parsePr('preview-ai', topology)).toBe(null)
   expect(parsePr('preview-ai', namedTopology)).toBe(null)
 })
+
+// ── 0.8.0: browser binding, cronsByEnv, observability override, injectUrlOf path ──
+
+test('render: browser binding → cfg.browser', async () => {
+  const w: WorkerDescriptor = { base: 'fe', dir: 'fe', main: 'i.ts', browser: { binding: 'BROWSER' }, deployOrder: 0 }
+  const cfg = await read(await renderConfig(w, opts(resolveEnv(topology, { preview: 3 }))))
+  expect(cfg.browser).toEqual({ binding: 'BROWSER' })
+})
+
+test('cronsByEnv: stable klíč → pole, chybějící klíč (preview) → explicitní []', async () => {
+  const w: WorkerDescriptor = {
+    base: 'fe',
+    dir: 'fe',
+    main: 'i.ts',
+    cronsByEnv: { prod: ['0 */6 * * *', '30 */6 * * *'] },
+    deployOrder: 0,
+  }
+  const prod = await read(await renderConfig(w, opts(resolveEnv(topology, { stable: 'prod' }))))
+  expect(prod.triggers).toEqual({ crons: ['0 */6 * * *', '30 */6 * * *'] })
+  const prev = await read(await renderConfig(w, opts(resolveEnv(topology, { preview: 9 }))))
+  expect(prev.triggers).toEqual({ crons: [] }) // explicitní [] → wrangler smaže stale crony
+})
+
+test('crons legacy: beze změny — všechny envs, bez cronsByEnv', async () => {
+  const w: WorkerDescriptor = { base: 'fe', dir: 'fe', main: 'i.ts', crons: ['0 * * * *'], deployOrder: 0 }
+  const prev = await read(await renderConfig(w, opts(resolveEnv(topology, { preview: 9 }))))
+  expect(prev.triggers).toEqual({ crons: ['0 * * * *'] })
+  const noCrons = await read(
+    await renderConfig({ ...w, crons: undefined }, opts(resolveEnv(topology, { preview: 9 }))),
+  )
+  expect(noCrons.triggers).toBeUndefined()
+})
+
+test('lint: crons + cronsByEnv současně → warning', () => {
+  const t: Topology = {
+    ...topology,
+    workers: [
+      { base: 'fe', dir: 'fe', main: 'i.ts', crons: ['0 * * * *'], cronsByEnv: { prod: [] }, deployOrder: 0 },
+    ],
+  }
+  expect(lintTopology(t).some((w) => w.includes('cronsByEnv') && w.includes('fe:'))).toBe(true)
+})
+
+test('observability: per-worker override NAHRAZUJE topology blok, jinak fallback', async () => {
+  const t = { ...topology, observability: { enabled: true, head_sampling_rate: 1 } }
+  const w: WorkerDescriptor = {
+    base: 'fe',
+    dir: 'fe',
+    main: 'i.ts',
+    observability: { enabled: true, logs: { enabled: true } },
+    deployOrder: 0,
+  }
+  const env = resolveEnv(t, { preview: 3 })
+  const cfg = await read(await renderConfig(w, opts(env, t)))
+  expect(cfg.observability).toEqual({ enabled: true, logs: { enabled: true } }) // replace, ne merge
+  const fallback = await read(await renderConfig({ ...w, observability: undefined }, opts(env, t)))
+  expect(fallback.observability).toEqual({ enabled: true, head_sampling_rate: 1 })
+})
+
+test('injectUrlOf: path suffix se připojí k doméně; bez path beze změny', async () => {
+  const fe: WorkerDescriptor = {
+    base: 'fe',
+    dir: 'fe',
+    main: 'i.ts',
+    injectUrlOf: { var: 'FEED_URL', worker: 'bank-service', path: '/feeds/seznam.xml' },
+    deployOrder: 1,
+  }
+  const t: Topology = { ...topology, workers: [bank, fe] }
+  const env = resolveEnv(t, { preview: 7 })
+  const cfg = await read(await renderConfig(fe, opts(env, t)))
+  expect(cfg.vars.FEED_URL).toBe('https://pr-7-bank-service.kleindaniel.com/feeds/seznam.xml')
+  const noPath = await read(
+    await renderConfig({ ...fe, injectUrlOf: { var: 'FEED_URL', worker: 'bank-service' } }, opts(env, t)),
+  )
+  expect(noPath.vars.FEED_URL).toBe('https://pr-7-bank-service.kleindaniel.com')
+})
+
+test('lint: injectUrlOf.path bez úvodního / → warning', () => {
+  const t: Topology = {
+    ...topology,
+    workers: [
+      {
+        base: 'fe',
+        dir: 'fe',
+        main: 'i.ts',
+        injectUrlOf: { var: 'V', worker: 'bank-service', path: 'feeds/x.xml' },
+        deployOrder: 0,
+      },
+    ],
+  }
+  expect(lintTopology(t).some((w) => w.includes('injectUrlOf.path'))).toBe(true)
+})

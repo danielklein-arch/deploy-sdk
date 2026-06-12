@@ -53,6 +53,14 @@ export function lintTopology(topology: Topology): string[] {
       seen.add(b.binding)
     }
 
+    // crons + cronsByEnv současně → flat se ignoruje celé (whole-field precedence), je mrtvý.
+    if (w.crons && w.cronsByEnv)
+      warnings.push(`${w.base}: 'crons' i 'cronsByEnv' → crons se ignoruje; nech jen cronsByEnv`)
+
+    // injectUrlOf.path bez úvodního '/' → slepená URL (https://domena feeds/...).
+    if (w.injectUrlOf?.path && !w.injectUrlOf.path.startsWith('/'))
+      warnings.push(`${w.base}: injectUrlOf.path '${w.injectUrlOf.path}' nezačíná '/' → slepená URL`)
+
     const flat = w.vars ?? {}
     const perEnvKeys = new Set<string>()
     for (const env of Object.values(w.varsByEnv ?? {})) for (const k of Object.keys(env)) perEnvKeys.add(k)

@@ -47,12 +47,19 @@ export type WorkerDescriptor = {
   r2?: R2Binding[]
   // Workers AI binding → wrangler `ai = { binding }` (CF limit: max 1 na worker)
   ai?: { binding: string }
+  // Browser Rendering binding → wrangler `browser = { binding }`. Account-level služba —
+  // žádný provisioning/cleanup (jako `ai`).
+  browser?: { binding: string }
   // Resolved jméno AI Gateway jako var (gateway nemá config binding — runtime reference by id)
   aiGateways?: AiGatewayBinding[]
   secretsStore?: SecretStoreBinding[] // bind na centrální CF Secrets Store (topology.secretsStoreId)
   durableObjects?: DurableObjectBinding[] // DO třídy exportované tímto workerem (+ SQLite migrace)
   workflows?: WorkflowBinding[] // Workflow třídy (cloud-side identita → cleanup je maže)
-  crons?: string[] // cron triggery (worker potřebuje `scheduled` handler)
+  crons?: string[] // cron triggery (worker potřebuje `scheduled` handler) — všechny envs
+  // Per-env cron triggery (klíč = env.key). Chybějící klíč = ŽÁDNÉ crony (renderuje explicitní [] →
+  // wrangler smaže stale triggery). Když je definované, `crons` se ignoruje celé.
+  // Motivace: preview PR nesmí spouštět produkční crony (kachlikarna Seznam feed každých 6 h).
+  cronsByEnv?: Record<string, string[]>
   queueProducers?: QueueProducer[]
   queueConsumers?: QueueConsumer[]
   vars?: Record<string, string>
@@ -60,8 +67,9 @@ export type WorkerDescriptor = {
   // Řeší env-specific config (FINBRICKS_BASE_URI sandbox vs prod, STORAGE_URL) BEZ resetu — každý env renderuje svou hodnotu.
   varsByEnv?: Record<string, Record<string, string>>
   // Injektuj custom-domain URL JINÉHO workeru jako var (generické — nahrazuje hardcoded frontend→GATEWAY_URL).
-  // var = jméno env proměnné, worker = base name workeru s custom doménou.
-  injectUrlOf?: { var: string; worker: string }
+  // var = jméno env proměnné, worker = base name workeru s custom doménou, path = volitelný suffix
+  // (např. '/feeds/seznam.xml' → https://<doména>/feeds/seznam.xml).
+  injectUrlOf?: { var: string; worker: string; path?: string }
   // custom domain `${prefix}${base}.${topology.previewZone}` (řeší worker→worker fetch; workers.dev hází CF 1042)
   customDomain?: boolean
   // Per-env FQDN šablona workeru, `{pr}` placeholder pro preview (dbu-txs: preview '{pr}.api.dbutxs.develit.dev',
@@ -72,6 +80,9 @@ export type WorkerDescriptor = {
   migrateCommand?: string
   // version_metadata binding (CF_VERSION_METADATA u dbu-txs gateway/frontend)
   versionMetadata?: string
+  // Per-worker observability override — NAHRAZUJE (ne merguje) topology.observability
+  // (kachlikarna: frontend logs+traces, secrets-store jen logs).
+  observability?: Record<string, unknown>
   // pořadí deploye: nižší dřív (services 0 → gateway 1 → frontend 2). Pozn.: plně paralelní matrix
   // pořadí nevynucuje (deployWorker retry-uje 10143); deployOrder používá jen lokální sériový wrapper.
   deployOrder: number

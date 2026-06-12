@@ -10,7 +10,9 @@ const PREVIEW_DIR = '.preview'
 // Precedence: env-level < worker flat < per-worker per-env override; + injektnutá custom-domain URL jiného workeru.
 export function computeVars(w: WorkerDescriptor, env: DeployEnv, topology: Topology): Record<string, string> {
   const vars: Record<string, string> = { ...env.vars, ...w.vars, ...(w.varsByEnv?.[env.key] ?? {}) }
-  if (w.injectUrlOf) vars[w.injectUrlOf.var] = `https://${resolveDomain(env, w.injectUrlOf.worker, topology)}`
+  if (w.injectUrlOf)
+    vars[w.injectUrlOf.var] =
+      `https://${resolveDomain(env, w.injectUrlOf.worker, topology)}${w.injectUrlOf.path ?? ''}`
   // Resolved jméno AI Gateway (gateway nemá config binding → runtime reference přes var). Vyhrává nad vars.
   for (const g of w.aiGateways ?? []) vars[g.binding] = aiGatewayName(env, g.resource, topology)
   return vars
@@ -34,7 +36,8 @@ export async function renderConfig(w: WorkerDescriptor, { env, ids, topology }: 
     compatibility_flags: topology.compat.flags,
     workers_dev: env.workersDev,
   }
-  if (topology.observability) cfg.observability = topology.observability
+  const observability = w.observability ?? topology.observability
+  if (observability) cfg.observability = observability
   // Static assets (Nuxt .output/public) — wrangler je servíruje, SSR worker je fallback.
   if (w.build?.assets) cfg.assets = { directory: `../${w.dir}/${w.build.assets}` }
   const services = [
@@ -62,6 +65,7 @@ export async function renderConfig(w: WorkerDescriptor, { env, ids, topology }: 
   if (w.kv?.length) cfg.kv_namespaces = w.kv.map((k) => ({ binding: k.binding, id: ids.kv[k.resource] }))
   if (w.r2?.length) cfg.r2_buckets = w.r2.map((b) => ({ binding: b.binding, bucket_name: bucketName(b.resource) }))
   if (w.ai) cfg.ai = { binding: w.ai.binding }
+  if (w.browser) cfg.browser = { binding: w.browser.binding }
   if (w.secretsStore?.length)
     cfg.secrets_store_secrets = w.secretsStore.map((s) => ({
       binding: s.binding,
@@ -84,7 +88,9 @@ export async function renderConfig(w: WorkerDescriptor, { env, ids, topology }: 
       ...(wf.limits && { limits: wf.limits }),
     }))
   if (w.versionMetadata) cfg.version_metadata = { binding: w.versionMetadata }
-  if (w.crons?.length) cfg.triggers = { crons: w.crons }
+  // cronsByEnv: chybějící env klíč = explicitní [] → wrangler smaže stale triggery (preview gating).
+  if (w.cronsByEnv) cfg.triggers = { crons: w.cronsByEnv[env.key] ?? [] }
+  else if (w.crons?.length) cfg.triggers = { crons: w.crons }
   if (w.customDomain) cfg.routes = [{ pattern: resolveDomain(env, w.base, topology), custom_domain: true }]
   const producers = w.queueProducers?.map((q) => ({ binding: q.binding, queue: name(q.resource) }))
   const consumers = w.queueConsumers?.map((q) => ({

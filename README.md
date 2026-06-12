@@ -155,8 +155,8 @@ Push do `dev` → stable deploy. Hotovo.
   }
   ```
 - `EnvConfig.domains` (env-level override) vyhrává nad šablonou.
-- `injectUrlOf: { var: 'NUXT_PUBLIC_GATEWAY_URL', worker: 'gateway' }` — injektne URL jiného workeru
-  jako var (bakeuje se i do SPA buildu).
+- `injectUrlOf: { var: 'NUXT_PUBLIC_GATEWAY_URL', worker: 'gateway', path: '/api' }` — injektne URL
+  jiného workeru jako var (bakeuje se i do SPA buildu); volitelný `path` suffix (`/feeds/seznam.xml`).
 
 ### Migrace D1
 - **Default**: `wrangler d1 migrations apply` z `<dir>/migrations/*.sql` (skip když dir chybí).
@@ -214,11 +214,20 @@ Defaulty create: cache off, logy on, rate limiting off. Gateway id povoluje jen 
 64 znaků vč. prefixu/suffixu (hlídá lint). CF limit 10 (free) / 20 (paid) gateways per account —
 pozor u per-PR gateways na počet otevřených PR.
 
+### Crons
+- `crons: ['0 */6 * * *']` — všechny envs.
+- `cronsByEnv: { dev: ['0 */6 * * *'], production: ['0 */6 * * *'] }` — per env (klíč = env key);
+  **chybějící klíč = žádné crony** (renderuje explicitní `[]` → wrangler smaže stale triggery).
+  Typicky: preview bez cronů (PR nemá spouštět produkční joby). Když je `cronsByEnv` definované,
+  `crons` se ignoruje celé (hlídá lint).
+
 ### Další pole
-`workflows` (+ `limits.steps`), `durableObjects` (SQLite), `crons`, `vars`/`varsByEnv` (per-worker
+`workflows` (+ `limits.steps`), `durableObjects` (SQLite), `vars`/`varsByEnv` (per-worker
 per-env override — řeší env-reset past), `externalServices` (worker mimo topologii, literální jméno
 per env), `vpcServices` (per-env `service_id`), `build` (build-before-deploy: Nuxt → `main`+`assets`),
-`versionMetadata`, `sharedR2Resources` (bez teardownu, preview kolabuje na 1), `observability`,
+`versionMetadata`, `sharedR2Resources` (bez teardownu, preview kolabuje na 1),
+`browser: { binding }` (Browser Rendering — account-level, bez provisioningu),
+`observability` (topology-level; per-worker `WorkerDescriptor.observability` ho NAHRAZUJE),
 `EnvConfig.workersDev: false` (stable bez workers.dev).
 
 ---
@@ -249,8 +258,10 @@ import {
 
 ## Stav
 
-`0.7.0` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
+`0.8.0` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
 (14 workerů, plný dbu-txs clone) + `examples/minimal-app` (single worker).
+- 0.8.0: `browser` binding (Browser Rendering), `cronsByEnv` (per-env cron gating), per-worker
+  `observability` override, `injectUrlOf.path`.
 - 0.7.0: AI Gateway (per-PR + shared, REST provisioning), `ai` binding, gateway var injection.
 - 0.6.x: suffix naming mode, domain šablony (`{pr}`), queue consumer config, `migrateCommand`
   (drizzle), `vpcServices`, workflow `limits`, `observability`, `version_metadata`, `workersDev`,
