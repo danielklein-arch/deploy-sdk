@@ -41,9 +41,21 @@ Common: -t/--topology <path> (default $TOPOLOGY_PATH || ./topology.ts; resolve z
 Env: PR_NUMBER (preview) | STABLE_ENV (stable), CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN`)
 }
 
+// Hint pro nejčastější CI příčinu prázdných credentials (dnes už dvakrát kousla).
+const CI_SECRETS_HINT =
+  'V GH Actions zkontroluj repo/org secrets; pozor — cross-org reusable workflow ' +
+  '`secrets: inherit` nepředá NIC, secrets se musí předat explicitně (viz header preview.yaml).'
+
 async function loadTopology(topoPath: string): Promise<Topology> {
-  const mod = (await import(resolve(process.cwd(), topoPath))) as { topology?: Topology }
-  if (!mod.topology) throw new Error(`modul '${topoPath}' neexportuje 'topology'`)
+  let mod: { topology?: Topology }
+  try {
+    mod = (await import(resolve(process.cwd(), topoPath))) as { topology?: Topology }
+  } catch (err) {
+    throw new Error(
+      `topologii '${topoPath}' nejde načíst (cesta? syntax error?) — cestu řídí -t/--topology nebo $TOPOLOGY_PATH, resolve z cwd. Příčina: ${err instanceof Error ? err.message : err}`,
+    )
+  }
+  if (!mod.topology) throw new Error(`modul '${topoPath}' neexportuje 'topology' — očekává se \`export const topology: Topology\``)
   return mod.topology
 }
 
@@ -51,11 +63,17 @@ async function loadTopology(topoPath: string): Promise<Topology> {
 // míří na správný account (multi-account: dbu-txs dev≠prod). Fallback na ambient (single-account).
 function activateAccount(env: DeployEnv): void {
   const accountId = env.accountId ?? process.env.CLOUDFLARE_ACCOUNT_ID
-  if (!accountId) fail(`env '${env.name}': chybí accountId (topology) ani CLOUDFLARE_ACCOUNT_ID`)
+  if (!accountId)
+    fail(
+      `env '${env.name}': chybí accountId — nastav topology.environments.accountId nebo env CLOUDFLARE_ACCOUNT_ID. ${CI_SECRETS_HINT}`,
+    )
   process.env.CLOUDFLARE_ACCOUNT_ID = accountId
   if (env.apiTokenEnv) {
     const token = process.env[env.apiTokenEnv]
-    if (!token) fail(`env '${env.name}': chybí API token v env proměnné '${env.apiTokenEnv}'`)
+    if (!token)
+      fail(
+        `env '${env.name}': chybí API token v env proměnné '${env.apiTokenEnv}' (topology.environments.apiTokenEnv). ${CI_SECRETS_HINT}`,
+      )
     process.env.CLOUDFLARE_API_TOKEN = token
   }
 }
@@ -64,7 +82,10 @@ function resolveDeployEnv(topology: Topology): DeployEnv {
   let env: DeployEnv
   if (process.env.STABLE_ENV) env = resolveEnv(topology, { stable: process.env.STABLE_ENV })
   else if (process.env.PR_NUMBER) env = resolveEnv(topology, { preview: Number(process.env.PR_NUMBER) })
-  else throw new Error('PR_NUMBER (preview) nebo STABLE_ENV (stable) required')
+  else
+    throw new Error(
+      'PR_NUMBER (preview) nebo STABLE_ENV (stable) required — reusable workflow je nastavuje sám; lokálně exportuj PR_NUMBER=<n> nebo STABLE_ENV=<branch>',
+    )
   activateAccount(env) // per-env account/token → process.env (wrangler + API)
   return env
 }
@@ -75,7 +96,7 @@ function emit(lines: string): void {
 }
 
 function requireAccount(): string {
-  return process.env.CLOUDFLARE_ACCOUNT_ID ?? fail('CLOUDFLARE_ACCOUNT_ID env required')
+  return process.env.CLOUDFLARE_ACCOUNT_ID ?? fail(`CLOUDFLARE_ACCOUNT_ID env required. ${CI_SECRETS_HINT}`)
 }
 
 // CfCtx pro REST cally — nese i source tokenu (OAuth fallback → provision fail-fast u aig/access).
@@ -85,11 +106,22 @@ async function restCtx(accountId: string) {
 }
 
 function parseIds(): Ids {
-  const raw = values.ids ?? process.env.PREVIEW_IDS ?? fail('PREVIEW_IDS env nebo --ids required')
+  const raw = values.ids ?? process.env.PREVIEW_IDS
+  if (raw === undefined)
+    fail(
+      'PREVIEW_IDS env nebo --ids required — v CI ho předává reusable workflow z provision outputs; lokálně použij `deploy-all` nebo --ids',
+    )
+  if (raw.trim() === '')
+    fail(
+      "PREVIEW_IDS je prázdný — provision output 'ids' se ztratil cestou. Typická příčina: GitHub ho zahodil " +
+        'kvůli secret redakci — na provision jobu hledej annotation "Skip output \'ids\' since it may contain secret". ' +
+        'Stává se, když caller předá víceřádkový secret (např. ENV_PASSTHROUGH_JSON: toJSON(secrets)) — ' +
+        'předej kompaktní 1-line JSON z konkrétních klíčů (viz header preview.yaml/deploy-stable.yaml).',
+    )
   try {
     return JSON.parse(raw)
   } catch {
-    throw new Error('PREVIEW_IDS/--ids není validní JSON')
+    throw new Error(`PREVIEW_IDS/--ids není validní JSON: '${raw.slice(0, 120)}'`)
   }
 }
 
@@ -142,7 +174,8 @@ switch (cmd) {
     const topology = await loadTopology(topoPath)
     const env = resolveDeployEnv(topology)
     const w = topology.workers.find((x) => x.base === base)
-    if (!w) throw new Error(`neznámý worker: ${base}`)
+    if (!w)
+      throw new Error(`neznámý worker '${base}' — topology.workers: ${topology.workers.map((x) => x.base).join(', ')}`)
     const url = await deployOne(w, topology, env, { ids, skipMigrations: process.env.SKIP_MIGRATIONS === '1' })
     await Bun.write(`.preview/url-${base}.txt`, url)
     console.log(`URL=${url}`)

@@ -148,7 +148,14 @@ export async function deployWorker(
       await new Promise((r) => setTimeout(r, 10_000))
       continue
     }
-    assert(res.exitCode === 0 && (m || !requireUrl), `deploy selhal:\n${out}`)
+    // Hint k nejčastějším příčinám — wrangler výstup bývá dlouhý a příčina zapadne.
+    const hints: string[] = []
+    if (/custom.?domain|zone/i.test(out))
+      hints.push('custom doména: zóna musí být na aktivním CF účtu a token potřebuje scope Zone:Read + Workers Routes:Edit')
+    if (/authentication|authorization|unauthorized|code: 100\d\d/i.test(out))
+      hints.push(`auth: zkontroluj CLOUDFLARE_API_TOKEN (scope Workers Scripts:Edit) + CLOUDFLARE_ACCOUNT_ID — správný účet?`)
+    const hint = hints.length ? `\n→ ${hints.join('\n→ ')}` : ''
+    assert(res.exitCode === 0 && (m || !requireUrl), `deploy selhal:\n${out}${hint}`)
     return m?.[0] ?? ''
   }
 }

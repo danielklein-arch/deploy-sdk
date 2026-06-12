@@ -21,7 +21,9 @@ function findStable(topology: Topology, name: string): { key: string; cfg: EnvCo
   if (direct) return { key: name, cfg: direct }
   for (const [key, cfg] of Object.entries(topology.environments))
     if (cfg.branch === name) return { key, cfg }
-  throw new Error(`neznámé stálé prostředí '${name}' (topology.environments — klíč ani branch)`)
+  throw new Error(
+    `neznámé stálé prostředí '${name}' — topology.environments klíče: ${Object.keys(topology.environments).join(', ')} (matchuje se klíč i .branch)`,
+  )
 }
 
 export function resolveEnv(topology: Topology, sel: EnvSelector): DeployEnv {

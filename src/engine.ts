@@ -133,7 +133,10 @@ export async function deployOne(
 // (volající ji vezme z deploy artifactu workers.dev).
 export function entrypointInfo(topology: Topology, env: DeployEnv): { base: string; url: string | null } {
   const w = topology.workers.find((x) => x.base === topology.entrypoint)
-  if (!w) throw new Error(`entrypoint worker '${topology.entrypoint}' není v topology.workers`)
+  if (!w)
+    throw new Error(
+      `entrypoint worker '${topology.entrypoint}' není v topology.workers (${topology.workers.map((x) => x.base).join(', ')})`,
+    )
   return {
     base: w.base,
     url: w.customDomain ? `https://${resolveDomain(env, w.base, topology)}` : null,
