@@ -1,13 +1,13 @@
 // Package PR-keying invariant. Centralizováno na JEDNOM místě → gc enumerace i entry skripty
 // sdílí stejnou konvenci (žádný drift mezi formátem a parsováním).
-// Legacy prefix mode: `pr-<N>-gateway`. Naming (suffix) mode: `<projectPrefix>gateway-<N>`.
+// Legacy prefix mode: `<N>-gateway` (driv `pr-<N>-gateway`). Naming (suffix) mode: `<projectPrefix>gateway-<N>`.
 import type { Topology } from './types'
 
-export const prefixFor = (pr: string | number): string => `pr-${pr}-`
+export const prefixFor = (pr: string | number): string => `${pr}-`
 
-// Vytáhne PR číslo z názvu zdroje (`pr-123-gateway` → 123), nebo null když nematchuje.
+// Vytáhne PR číslo z názvu zdroje (`123-gateway` → 123; toleruje i legacy `pr-123-gateway`).
 export const parsePrefix = (name: string): number | null => {
-  const m = name.match(/^pr-(\d+)-/)
+  const m = name.match(/^(?:pr-)?(\d+)-/)
   return m ? Number(m[1]) : null
 }
 

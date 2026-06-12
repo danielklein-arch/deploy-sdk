@@ -10,7 +10,7 @@ cleanup/gc, multi-account, custom domény) řeší engine.
 
 ```
 PR open  → provision → matrix deploy (každý worker paralelně) → smoke → sticky comment s URL
-PR close → cleanup (smaže vše pr-<N>-*)
+PR close → cleanup (smaže vše <N>-*)
 push dev/staging/prod → CI gate → provision → migrate → matrix deploy → smoke   (persistentní)
 cron     → gc (smaže orphany zavřených PR)
 ```
@@ -134,7 +134,7 @@ Push do `dev` → stable deploy. Hotovo.
 ### Prostředí & naming
 - **Preview** = ephemeral, per-PR. **Stable** = persistentní (dev/staging/production), `STABLE_ENV` = jméno větve;
   liší-li se env key od větve, mapuje `EnvConfig.branch` (větev `prod` → env `production`).
-- **Legacy prefix mode** (default): jména `pr-<N>-order` / `dev-order` / `production-order`.
+- **Legacy prefix mode** (default): jména `<N>-order` / `dev-order` / `production-order`.
 - **Suffix naming mode** — pro adopci EXISTUJÍCÍCH zdrojů (dbu-txs vzor):
   ```ts
   naming: { prefix: 'dbu-txs-' },

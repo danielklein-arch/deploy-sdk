@@ -203,7 +203,7 @@ jobs:
             |---|---|
             ${{ steps.urls.outputs.table }}
 
-            Resources `pr-${{ github.event.number }}-*` se smažou po zavření PR.
+            Resources `${{ github.event.number }}-*` se smažou po zavření PR.
 
       - if: failure()
         uses: marocchino/sticky-pull-request-comment@v3
@@ -240,4 +240,4 @@ jobs:
           header: preview
           message: |
             ### 🧹 Preview pro PR #${{ github.event.number }} smazán
-            Všechny `pr-${{ github.event.number }}-*` workery + resources odstraněny.
+            Všechny `${{ github.event.number }}-*` workery + resources odstraněny.

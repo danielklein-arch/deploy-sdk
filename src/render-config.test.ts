@@ -52,7 +52,7 @@ const read = (path: string) => Bun.file(path).json()
 test('resolveEnv preview: key=preview, merguje environments.preview', () => {
   const env = resolveEnv(topology, { preview: 7 })
   expect(env.key).toBe('preview')
-  expect(env.prefix).toBe('pr-7-')
+  expect(env.prefix).toBe('7-')
   expect(env.ephemeral).toBe(true)
   expect(env.vars).toEqual({ ENVIRONMENT: 'preview', TIER: 'sandbox' })
 })
@@ -71,7 +71,7 @@ test('render preview: sandbox finbricks, external mdm-preview, shared bucket pre
   expect(cfg.vars.ENVIRONMENT).toBe('preview')
   expect(cfg.services).toContainEqual({ binding: 'MDM_GATEWAY', service: 'mdm-preview' })
   expect(cfg.r2_buckets).toContainEqual({ binding: 'DOCS', bucket_name: 'preview-documents' })
-  expect(cfg.r2_buckets).toContainEqual({ binding: 'RCPT', bucket_name: 'pr-7-receipts' })
+  expect(cfg.r2_buckets).toContainEqual({ binding: 'RCPT', bucket_name: '7-receipts' })
 })
 
 test('render prod: prod finbricks (NO reset), external mdm-prod, shared bucket prod-', async () => {
@@ -220,14 +220,14 @@ test('queue consumer config: batch/timeout/retries bez DLQ i s DLQ', async () =>
   }
   const cfg = await read(await renderConfig(w, opts(resolveEnv(topology, { preview: 9 }))))
   const [audit, bus, notif] = cfg.queues.consumers
-  expect(audit).toEqual({ queue: 'pr-9-audit-logs', max_batch_size: 100, max_batch_timeout: 5 })
-  expect(bus).toEqual({ queue: 'pr-9-queue-bus', max_batch_size: 10, max_batch_timeout: 5, max_retries: 3 })
+  expect(audit).toEqual({ queue: '9-audit-logs', max_batch_size: 100, max_batch_timeout: 5 })
+  expect(bus).toEqual({ queue: '9-queue-bus', max_batch_size: 10, max_batch_timeout: 5, max_retries: 3 })
   expect(notif).toEqual({
-    queue: 'pr-9-notifications',
+    queue: '9-notifications',
     max_batch_size: 1,
     max_batch_timeout: 5,
     max_retries: 5,
-    dead_letter_queue: 'pr-9-notifications-dlq',
+    dead_letter_queue: '9-notifications-dlq',
   })
 })
 
@@ -308,7 +308,8 @@ test('lint: duplicitní service binding (services + externalServices) → warnin
 
 test('parsePr: legacy prefix vs naming suffix mode', async () => {
   const { parsePr } = await import('./prefix')
-  expect(parsePr('pr-123-gateway', topology)).toBe(123)
+  expect(parsePr('123-gateway', topology)).toBe(123)
+  expect(parsePr('pr-123-gateway', topology)).toBe(123) // legacy
   expect(parsePr('dev-gateway', topology)).toBe(null)
   expect(parsePr('dbu-txs-order-1577', namedTopology)).toBe(1577)
   expect(parsePr('dbu-txs-order-dev', namedTopology)).toBe(null) // stable suffix nematchuje
@@ -342,7 +343,7 @@ test('render: ai binding → cfg.ai, gateway vars per-PR vs shared (preview)', a
   const env = resolveEnv(aiTopology, { preview: 7 })
   const cfg = await read(await renderConfig(aiWorker, opts(env, aiTopology)))
   expect(cfg.ai).toEqual({ binding: 'AI' })
-  expect(cfg.vars.AI_GATEWAY_ID).toBe('pr-7-ai') // per-PR
+  expect(cfg.vars.AI_GATEWAY_ID).toBe('7-ai') // per-PR
   expect(cfg.vars.AI_GATEWAY_SHARED_ID).toBe('preview-ai-shared') // shared kolaps
   expect(cfg.vars.COMMON).toBe('x') // ostatní vars nedotčené
 })
@@ -367,7 +368,7 @@ test('vars kolize s aiGateways bindingem: gateway hodnota vyhraje', async () => 
   }
   const t = { ...aiTopology, workers: [w] }
   const cfg = await read(await renderConfig(w, opts(resolveEnv(t, { preview: 7 }), t)))
-  expect(cfg.vars.AI_GATEWAY_ID).toBe('pr-7-ai')
+  expect(cfg.vars.AI_GATEWAY_ID).toBe('7-ai')
 })
 
 test('lint: ai-gateway v obou listech → warning', () => {
@@ -474,11 +475,11 @@ test('injectUrlOf: path suffix se připojí k doméně; bez path beze změny', a
   const t: Topology = { ...topology, workers: [bank, fe] }
   const env = resolveEnv(t, { preview: 7 })
   const cfg = await read(await renderConfig(fe, opts(env, t)))
-  expect(cfg.vars.FEED_URL).toBe('https://pr-7-bank-service.kleindaniel.com/feeds/seznam.xml')
+  expect(cfg.vars.FEED_URL).toBe('https://7-bank-service.kleindaniel.com/feeds/seznam.xml')
   const noPath = await read(
     await renderConfig({ ...fe, injectUrlOf: { var: 'FEED_URL', worker: 'bank-service' } }, opts(env, t)),
   )
-  expect(noPath.vars.FEED_URL).toBe('https://pr-7-bank-service.kleindaniel.com')
+  expect(noPath.vars.FEED_URL).toBe('https://7-bank-service.kleindaniel.com')
 })
 
 test('lint: injectUrlOf.path bez úvodního / → warning', () => {

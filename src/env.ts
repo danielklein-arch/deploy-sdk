@@ -30,12 +30,12 @@ export function resolveEnv(topology: Topology, sel: EnvSelector): DeployEnv {
   const naming = topology.naming
   if ('preview' in sel) {
     // Preview může mít env-level defaulty přes topology.environments.preview (sandbox vars/secrets/domains).
-    // Per-PR identita: legacy prefix `pr-<N>-`, naming mode suffix `-<N>`.
+    // Per-PR identita: prefix `<N>-`, naming mode suffix `-<N>`.
     const previewCfg = topology.environments.preview
     return {
       name: `pr-${sel.preview}`,
       key: 'preview',
-      prefix: naming ? naming.prefix : `pr-${sel.preview}-`,
+      prefix: naming ? naming.prefix : `${sel.preview}-`,
       suffix: naming ? `-${sel.preview}` : '',
       pr: sel.preview,
       workersDev: previewCfg?.workersDev ?? true,
