@@ -496,3 +496,41 @@ test('lint: injectUrlOf.path bez úvodního / → warning', () => {
   }
   expect(lintTopology(t).some((w) => w.includes('injectUrlOf.path'))).toBe(true)
 })
+
+// ── 0.9.0: accessByEnv lint ──
+
+test('lint: accessByEnv.preview bez {pr} šablony + entry bez policy → warnings', () => {
+  const t: Topology = {
+    ...topology,
+    workers: [
+      {
+        base: 'fe',
+        dir: 'fe',
+        main: 'i.ts',
+        accessByEnv: { preview: { emailDomains: ['develit.io'] }, dev: {} },
+        domainsByEnv: { dev: 'dev.app.example.dev' }, // chybí preview šablona
+        deployOrder: 0,
+      },
+    ],
+  }
+  const warnings = lintTopology(t)
+  expect(warnings.some((w) => w.includes('accessByEnv.preview') && w.includes('{pr}'))).toBe(true)
+  expect(warnings.some((w) => w.includes('accessByEnv.dev') && w.includes('nepustí'))).toBe(true)
+})
+
+test('lint: accessByEnv s {pr} šablonou a policy → bez access warningů', () => {
+  const t: Topology = {
+    ...topology,
+    workers: [
+      {
+        base: 'fe',
+        dir: 'fe',
+        main: 'i.ts',
+        accessByEnv: { preview: { emailDomains: ['develit.io'], serviceToken: true } },
+        domainsByEnv: { preview: '{pr}.app.example.dev' },
+        deployOrder: 0,
+      },
+    ],
+  }
+  expect(lintTopology(t).some((w) => w.includes('accessByEnv'))).toBe(false)
+})

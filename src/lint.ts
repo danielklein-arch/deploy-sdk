@@ -61,6 +61,14 @@ export function lintTopology(topology: Topology): string[] {
     if (w.injectUrlOf?.path && !w.injectUrlOf.path.startsWith('/'))
       warnings.push(`${w.base}: injectUrlOf.path '${w.injectUrlOf.path}' nezačíná '/' → slepená URL`)
 
+    // accessByEnv: preview wildcard se odvozuje z domainsByEnv.preview šablony s {pr}.
+    for (const [envKey, policy] of Object.entries(w.accessByEnv ?? {})) {
+      if (envKey === 'preview' && !w.domainsByEnv?.preview?.includes('{pr}'))
+        warnings.push(`${w.base}: accessByEnv.preview vyžaduje domainsByEnv.preview s '{pr}' (wildcard app)`)
+      if (!policy.emailDomains?.length && !policy.serviceToken)
+        warnings.push(`${w.base}: accessByEnv.${envKey} bez emailDomains i serviceToken → app nikoho nepustí`)
+    }
+
     const flat = w.vars ?? {}
     const perEnvKeys = new Set<string>()
     for (const env of Object.values(w.varsByEnv ?? {})) for (const k of Object.keys(env)) perEnvKeys.add(k)

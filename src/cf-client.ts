@@ -227,6 +227,66 @@ export async function deleteAiGateway(name: string, ctx: CfCtx): Promise<void> {
   throw new Error(`[cf-client] ai-gateway delete ${name} selhal: ${JSON.stringify(j.errors)}`)
 }
 
+// ── Access apps (Zero Trust; jen REST API — wrangler příkaz neexistuje) ──────
+// Apps persistují (preview wildcard sdílí všechny PR) → žádný delete wrapper/cleanup.
+
+export type AccessPolicy = { emailDomains?: string[]; serviceToken?: boolean }
+
+// Inline policies: emailDomains → allow podle e-mail domény; serviceToken → non_identity
+// (any_valid_service_token) pro CI smoke s CF-Access-Client-Id/Secret headery. Exportováno kvůli testu.
+export const accessAppCreateBody = (domain: string, policy: AccessPolicy) => ({
+  name: domain,
+  type: 'self_hosted',
+  domain,
+  policies: [
+    ...(policy.emailDomains?.length
+      ? [
+          {
+            name: `${domain} email`,
+            decision: 'allow',
+            include: policy.emailDomains.map((d) => ({ email_domain: { domain: d } })),
+          },
+        ]
+      : []),
+    ...(policy.serviceToken
+      ? [
+          {
+            name: `${domain} service token`,
+            decision: 'non_identity',
+            include: [{ any_valid_service_token: {} }],
+          },
+        ]
+      : []),
+  ],
+})
+
+export async function accessAppDomains(ctx: CfCtx): Promise<string[]> {
+  const domains: string[] = []
+  for (let page = 1; ; page++) {
+    const j = await cfApi<Array<{ domain?: string }>>(ctx, `/access/apps?page=${page}&per_page=50`)
+    assert(j.success, `access apps list selhal: ${JSON.stringify(j.errors)}`)
+    const batch = (j.result ?? []).map((a) => a.domain).filter((d): d is string => !!d)
+    domains.push(...batch)
+    if ((j.result ?? []).length < 50) return domains
+  }
+}
+
+// Create-if-missing (match podle domain). Změna policy existující appky = ruční úprava/smazání v ZT.
+export async function ensureAccessApp(
+  domain: string,
+  policy: AccessPolicy,
+  ctx: CfCtx,
+  log: Logger = consoleLogger,
+): Promise<void> {
+  if ((await accessAppDomains(ctx)).includes(domain)) {
+    log.info(`[access] reuse app ${domain}`)
+    return
+  }
+  log.info(`[access] create app ${domain}`)
+  const j = await cfApi(ctx, '/access/apps', { method: 'POST', body: accessAppCreateBody(domain, policy) })
+  assert(j.success, `access app create ${domain} selhal: ${JSON.stringify(j.errors)}`)
+}
+
 // ── Delete wrappery (best-effort orchestruje cleanup.ts) ─────────────────────
 
 export const removeQueueConsumer = (queue: string, worker: string) =>

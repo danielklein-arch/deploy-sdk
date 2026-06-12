@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { expect, test } from 'bun:test'
-import { hasSqlMigrations, aiGatewayCreateBody } from './cf-client'
+import { hasSqlMigrations, aiGatewayCreateBody, accessAppCreateBody } from './cf-client'
 
 test('hasSqlMigrations: dir s .sql → true, bez dir / prázdný → false', () => {
   const base = `${tmpdir()}/dsdk-hasmig-test`
@@ -28,4 +28,36 @@ test('aiGatewayCreateBody: id + required defaulty (cache off, logy on, rate limi
     rate_limiting_interval: 0,
     rate_limiting_limit: 0,
   })
+})
+
+test('accessAppCreateBody: email policy / service token policy / obě', () => {
+  const email = accessAppCreateBody('*.app.example.dev', { emailDomains: ['develit.io'] })
+  expect(email).toEqual({
+    name: '*.app.example.dev',
+    type: 'self_hosted',
+    domain: '*.app.example.dev',
+    policies: [
+      {
+        name: '*.app.example.dev email',
+        decision: 'allow',
+        include: [{ email_domain: { domain: 'develit.io' } }],
+      },
+    ],
+  })
+
+  const token = accessAppCreateBody('dev.app.example.dev', { serviceToken: true })
+  expect(token.policies).toEqual([
+    {
+      name: 'dev.app.example.dev service token',
+      decision: 'non_identity',
+      include: [{ any_valid_service_token: {} }],
+    },
+  ])
+
+  const both = accessAppCreateBody('x.dev', { emailDomains: ['a.io', 'b.io'], serviceToken: true })
+  expect(both.policies).toHaveLength(2)
+  expect(both.policies[0]?.include).toEqual([
+    { email_domain: { domain: 'a.io' } },
+    { email_domain: { domain: 'b.io' } },
+  ])
 })

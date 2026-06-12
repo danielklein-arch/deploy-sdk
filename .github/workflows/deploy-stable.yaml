@@ -180,4 +180,8 @@ jobs:
           # env KEY z provision (branch→env mapping resi topology, ne YAML)
           ENVIRONMENT_EXPECTED: ${{ needs.provision.outputs.envKey }}
           SMOKE_SCRIPT: ${{ inputs.smoke-script }}
+          # Access (accessByEnv + serviceToken): smoke posila CF-Access-Client-Id/Secret headery.
+          # Secrets volitelne — bez Accessu zustanou prazdne (no-op).
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: bash "$SMOKE_SCRIPT"

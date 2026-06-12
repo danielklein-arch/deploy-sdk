@@ -75,6 +75,13 @@ export type WorkerDescriptor = {
   // Per-env FQDN šablona workeru, `{pr}` placeholder pro preview (dbu-txs: preview '{pr}.api.dbutxs.develit.dev',
   // dev 'dev.api.dbutxs.develit.dev', production 'api.txs.devizovaburza.cz'). Priorita: env.domains > tohle > default.
   domainsByEnv?: Record<string, string>
+  // Cloudflare Access (Zero Trust) ochrana per env (klíč = env.key; chybějící klíč = bez Accessu).
+  // REST-only (wrangler Access neumí) → provision; token scope `Access: Apps and Policies Write`.
+  // Preview = JEDNA wildcard app z domainsByEnv.preview šablony ({pr} → *), persistuje (žádný per-PR
+  // cleanup); stable = app na resolved doméně. Předpoklad: ZT org na účtu existuje (ruční, jednorázově).
+  // serviceToken: non_identity policy (any_valid_service_token) pro CI smoke — token vytvoř ručně
+  // v ZT dashboardu, Id/Secret → GH secrets CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET.
+  accessByEnv?: Record<string, { emailDomains?: string[]; serviceToken?: boolean }>
   // Custom migrate command (drizzle-kit apod.) — `migrate`/deployOne ho spustí MÍSTO `wrangler d1 migrations apply`.
   // Env dostane ENVIRONMENT + D1_ID_<BINDING>/D1_NAME_<BINDING> pro každý d1 binding workeru.
   migrateCommand?: string

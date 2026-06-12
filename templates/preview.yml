@@ -2,6 +2,8 @@ name: PR Preview
 # Tenky wrapper — logika zije v reusable workflow deploy-sdk repa.
 # Prizpusob: trigger branches, env-passthrough (CSV GH secrets pro topology vars),
 # pripadne smoke-script / bun-version.
+# accessByEnv + serviceToken: pridej GH secrets CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET
+# (rucne vytvoreny ZT service token) — smoke je dostane v env a posila Access headery.
 on:
   pull_request:
     types: [opened, reopened, synchronize, closed]

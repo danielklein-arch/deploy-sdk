@@ -8,6 +8,7 @@ import {
   ensureQueue,
   ensureR2,
   ensureAiGateway,
+  ensureAccessApp,
   applyD1Migrations,
   hasSqlMigrations,
   deployWorker,
@@ -44,6 +45,23 @@ export async function provision(
   if (aig.length) {
     if (!ctx) throw new Error('[provision] aiGateway resources vyžadují ctx (CF REST API)')
     for (const n of aig) await ensureAiGateway(n, ctx, log)
+  }
+  // Access apps (Zero Trust) — REST-only, persistují (žádný cleanup). Preview = jedna wildcard
+  // app z domainsByEnv.preview šablony ({pr} → *) pro všechny PR; stable = resolved doména.
+  for (const w of topology.workers) {
+    const policy = w.accessByEnv?.[env.key]
+    if (!policy) continue
+    if (!ctx) throw new Error('[provision] accessByEnv vyžaduje ctx (CF REST API)')
+    let domain: string
+    if (env.ephemeral) {
+      const tpl = w.domainsByEnv?.[env.key]
+      if (!tpl?.includes('{pr}'))
+        throw new Error(`[provision] accessByEnv '${w.base}': preview vyžaduje domainsByEnv.preview s '{pr}'`)
+      domain = tpl.replaceAll('{pr}', '*')
+    } else {
+      domain = resolveDomain(env, w.base, topology)
+    }
+    await ensureAccessApp(domain, policy, ctx, log)
   }
   return ids
 }

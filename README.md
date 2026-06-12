@@ -112,8 +112,12 @@ CI doporučeně zvlášť v `ci.yml` jen na `pull_request` (push má gate v depl
 #   Workers Scripts:Edit, D1:Edit, Queues:Edit, Workers KV Storage:Edit, Workers R2 Storage:Edit
 # + pro custom domény: Zone:Read a Workers Routes:Edit na dané zóně
 # + pro aiGatewayResources: AI Gateway:Read a AI Gateway:Edit
+# + pro accessByEnv: Access: Apps and Policies:Edit
 gh secret set CLOUDFLARE_API_TOKEN
 gh secret set CLOUDFLARE_ACCOUNT_ID --body <account-id>
+# jen s accessByEnv + serviceToken (ručně vytvořený ZT service token pro CI smoke):
+gh secret set CF_ACCESS_CLIENT_ID
+gh secret set CF_ACCESS_CLIENT_SECRET
 ```
 
 ### 6. Branch protection
@@ -221,6 +225,27 @@ pozor u per-PR gateways na počet otevřených PR.
   Typicky: preview bez cronů (PR nemá spouštět produkční joby). Když je `cronsByEnv` definované,
   `crons` se ignoruje celé (hlídá lint).
 
+### Access (Zero Trust)
+```ts
+accessByEnv: {
+  preview: { emailDomains: ['develit.io'], serviceToken: true }, // dev/preview za SSO; prod bez klíče = veřejný
+  dev: { emailDomains: ['develit.io'] },
+}
+```
+Chrání deploymenty Cloudflare Accessem (klíč = env key; chybějící klíč = bez Accessu). REST-only
+(wrangler Access neumí) → provisionuje se v `provision`, **create-if-missing** podle domény (změna
+policy = ruční úprava v ZT dashboardu). Apps **persistují** — žádný per-PR cleanup:
+- **preview** = JEDNA wildcard app z `domainsByEnv.preview` šablony (`{pr}` → `*`,
+  např. `*.produkt.develit.dev`) pro všechny PR.
+- **stable** = app na resolved doméně env.
+- `emailDomains` → allow policy podle e-mail domény; `serviceToken: true` → `non_identity` policy
+  (any_valid_service_token) pro CI smoke — service token vytvoř ručně v ZT dashboardu, Id/Secret dej
+  do GH secrets `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET` (reusable workflow je předá smoke
+  scriptu; ten posílá `CF-Access-Client-Id`/`CF-Access-Client-Secret` headery).
+
+Předpoklady: Zero Trust org na účtu (ruční, jednorázová; free plán 50 seats), token scope
+`Access: Apps and Policies Write`. Funguje i pro workers.dev hostnames.
+
 ### Další pole
 `workflows` (+ `limits.steps`), `durableObjects` (SQLite), `vars`/`varsByEnv` (per-worker
 per-env override — řeší env-reset past), `externalServices` (worker mimo topologii, literální jméno
@@ -258,8 +283,10 @@ import {
 
 ## Stav
 
-`0.8.0` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
+`0.9.0` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
 (14 workerů, plný dbu-txs clone) + `examples/minimal-app` (single worker).
+- 0.9.0: `accessByEnv` — Cloudflare Access (ZT) apps přes REST: preview wildcard + stable,
+  email/service-token policies, smoke `CF_ACCESS_*` env. Živě neověřeno (ZT org až na Develit účtu).
 - 0.8.0: `browser` binding (Browser Rendering), `cronsByEnv` (per-env cron gating), per-worker
   `observability` override, `injectUrlOf.path`.
 - 0.7.0: AI Gateway (per-PR + shared, REST provisioning), `ai` binding, gateway var injection.

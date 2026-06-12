@@ -1,6 +1,7 @@
 name: Deploy Stable
 # Tenky wrapper — logika zije v reusable workflow deploy-sdk repa. CI gate = consumer
 # concern (ci-sdk job + needs). Branch→env mapping resi topology.ts (EnvConfig.branch).
+# accessByEnv + serviceToken: GH secrets CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET → smoke env.
 on:
   push:
     branches: [dev, staging, prod]
