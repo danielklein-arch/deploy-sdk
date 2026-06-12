@@ -6,6 +6,15 @@ export type EnvSelector = { preview: number } | { stable: string }
 // Finální jméno zdroje/workeru pro env. Legacy: `${prefix}${base}`; naming mode: `${prefix}${base}${suffix}`.
 export const nameFor = (env: DeployEnv, base: string): string => `${env.prefix}${base}${env.suffix}`
 
+// Jméno shared-collapse zdroje (sharedR2 / sharedAiGateway): preview všech PR sdílí `preview-${base}`,
+// stable per-env jméno.
+export const sharedNameFor = (env: DeployEnv, base: string): string =>
+  env.ephemeral ? `preview-${base}` : nameFor(env, base)
+
+// Resolved jméno AI Gateway pro binding — shared vs per-PR podle topology listů.
+export const aiGatewayName = (env: DeployEnv, resource: string, topology: Topology): string =>
+  topology.sharedAiGatewayResources?.includes(resource) ? sharedNameFor(env, resource) : nameFor(env, resource)
+
 // Stable lookup: přímý klíč → fallback scan podle EnvConfig.branch (branch 'prod' → env 'production').
 function findStable(topology: Topology, name: string): { key: string; cfg: EnvConfig } {
   const direct = topology.environments[name]

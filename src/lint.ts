@@ -1,6 +1,7 @@
 // Statická kontrola topologie — varuje na vzory vedoucí k env-resetu (dbu-txs FINBRICKS past:
 // env-specific hodnota jako flat `vars` → deploy přepíše prod na default) + config footguny. Advisory.
 import type { Topology } from './types'
+import { resolveEnv, nameFor, sharedNameFor } from './env'
 
 // Názvy, co typicky nesou env-specific endpoint/credential (riziko když jsou flat).
 // Pozn.: `_ID$` ZÁMĚRNĚ vynecháno (ACCOUNT_ID/STORE_ID jsou legitimně flat); MERCHANT chytneme substringem.
@@ -15,6 +16,34 @@ export function lintTopology(topology: Topology): string[] {
   for (const r of topology.r2Resources)
     if (shared.has(r)) warnings.push(`r2 '${r}' je v r2Resources i sharedR2Resources → vyber jen jeden (preview leak)`)
 
+  // AI Gateway: dual-list (mirror R2 checku).
+  const aigShared = new Set(topology.sharedAiGatewayResources ?? [])
+  for (const r of topology.aiGatewayResources ?? [])
+    if (aigShared.has(r))
+      warnings.push(`ai-gateway '${r}' je v aiGatewayResources i sharedAiGatewayResources → vyber jen jeden`)
+
+  // Gateway id constraint: [a-z0-9-], max 64 — kontrola nejdelších finálních jmen
+  // (preview s 6-místným PR + všechny stable envy; klíč 'preview' není stable env → skip).
+  const AIG_ID = /^[a-z0-9-]+$/
+  const aigEntries = [
+    ...(topology.aiGatewayResources ?? []).map((r) => [r, false] as const),
+    ...(topology.sharedAiGatewayResources ?? []).map((r) => [r, true] as const),
+  ]
+  for (const [r, isShared] of aigEntries) {
+    const previewEnv = resolveEnv(topology, { preview: 999999 })
+    const names = [
+      isShared ? sharedNameFor(previewEnv, r) : nameFor(previewEnv, r),
+      ...Object.keys(topology.environments)
+        .filter((k) => k !== 'preview')
+        .map((k) => nameFor(resolveEnv(topology, { stable: k }), r)),
+    ]
+    for (const n of names) {
+      if (!AIG_ID.test(n)) warnings.push(`ai-gateway '${r}': jméno '${n}' — gateway id povoluje jen [a-z0-9-]`)
+      if (n.length > 64) warnings.push(`ai-gateway '${r}': jméno '${n}' přes 64 znaků (CF limit)`)
+    }
+  }
+  const aigAll = new Set([...(topology.aiGatewayResources ?? []), ...(topology.sharedAiGatewayResources ?? [])])
+
   for (const w of topology.workers) {
     // Duplicitní service binding napříč services + externalServices → wrangler last-wins, tichá chyba.
     const seen = new Set<string>()
@@ -27,6 +56,16 @@ export function lintTopology(topology: Topology): string[] {
     const flat = w.vars ?? {}
     const perEnvKeys = new Set<string>()
     for (const env of Object.values(w.varsByEnv ?? {})) for (const k of Object.keys(env)) perEnvKeys.add(k)
+
+    for (const g of w.aiGateways ?? []) {
+      if (!aigAll.has(g.resource))
+        warnings.push(
+          `${w.base}: aiGateways '${g.binding}' → resource '${g.resource}' není v aiGatewayResources ani sharedAiGatewayResources`,
+        )
+      // Gateway var se injektuje renderem a vyhrává → ruční var stejného jména je mrtvý.
+      if (flat[g.binding] !== undefined || perEnvKeys.has(g.binding))
+        warnings.push(`${w.base}: var '${g.binding}' koliduje s aiGateways bindingem → gateway hodnota vyhraje`)
+    }
 
     for (const k of Object.keys(flat)) {
       // klíč současně flat i per-env → flat může maskovat per-env (nejednoznačný zdroj).

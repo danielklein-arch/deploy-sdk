@@ -117,8 +117,8 @@ switch (cmd) {
     const topology = await loadTopology(topoPath)
     warnLint(topology)
     const env = resolveDeployEnv(topology) // aktivuje per-env account/token
-    requireAccount()
-    const ids = await provision(topology, env)
+    const accountId = requireAccount()
+    const ids = await provision(topology, env, { ctx: { accountId, apiToken: await resolveCfToken() } })
     const ep = entrypointInfo(topology, env)
     emit(
       `ids=${JSON.stringify(ids)}\n` +
@@ -194,7 +194,8 @@ switch (cmd) {
     warnLint(topology)
     const env = resolveDeployEnv(topology) // aktivuje per-env account/token
     console.log(`[deploy-all] env ${env.name} → prefix ${env.prefix}`)
-    const ids = await provision(topology, env)
+    const accountId = requireAccount()
+    const ids = await provision(topology, env, { ctx: { accountId, apiToken: await resolveCfToken() } })
     const ordered = [...topology.workers].sort((a, b) => a.deployOrder - b.deployOrder)
     const urls: Record<string, string> = {}
     for (const w of ordered) urls[w.base] = await deployOne(w, topology, env, { ids })

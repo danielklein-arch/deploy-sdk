@@ -111,6 +111,7 @@ CI doporučeně zvlášť v `ci.yml` jen na `pull_request` (push má gate v depl
 # CF API token (dashboard → Create Token → custom). Account scopes:
 #   Workers Scripts:Edit, D1:Edit, Queues:Edit, Workers KV Storage:Edit, Workers R2 Storage:Edit
 # + pro custom domény: Zone:Read a Workers Routes:Edit na dané zóně
+# + pro aiGatewayResources: AI Gateway:Read a AI Gateway:Edit
 gh secret set CLOUDFLARE_API_TOKEN
 gh secret set CLOUDFLARE_ACCOUNT_ID --body <account-id>
 ```
@@ -187,6 +188,32 @@ environments: {
 CLI aktivuje správný account+token per env. `secretsStore` bindingy (CF Secrets Store) mají per-env
 store id i per-env override jmen secretů (`EnvConfig.secrets`).
 
+Per-PR secrets store NEJDE — CF dovoluje 1 store per account (open beta) a hodnoty jsou write-only
+(žádný clone). Preview PRs sdílí store; per-env izolaci řeš přes `EnvConfig.secrets` override jmen.
+
+### AI Gateway
+```ts
+aiGatewayResources: ['ai'],            // per-PR (pr-7-ai), teardown na PR close
+sharedAiGatewayResources: ['ai-pool'], // preview kolabuje na preview-ai-pool, stable per-env; persistuje
+workers: [{
+  ...,
+  ai: { binding: 'AI' },                                   // wrangler `ai` binding (max 1/worker)
+  aiGateways: [{ binding: 'AI_GATEWAY_ID', resource: 'ai' }],
+}]
+```
+AI Gateway **nemá** wrangler config binding — worker gateway referencuje za runtime podle id. SDK
+gateway provisionuje přes CF REST API (wrangler příkaz neexistuje) a resolved jméno injektne jako
+**var** (`binding` = jméno varu; bakeuje se i do SPA buildu):
+```ts
+// Workers AI přes gateway:
+await env.AI.run('@cf/meta/llama-3.3-70b-instruct', input, { gateway: { id: env.AI_GATEWAY_ID } })
+// HTTP provider (OpenAI/Anthropic/…):
+fetch(`https://gateway.ai.cloudflare.com/v1/<ACCOUNT_ID>/${env.AI_GATEWAY_ID}/<provider>/...`)
+```
+Defaulty create: cache off, logy on, rate limiting off. Gateway id povoluje jen `[a-z0-9-]`, max
+64 znaků vč. prefixu/suffixu (hlídá lint). CF limit 10 (free) / 20 (paid) gateways per account —
+pozor u per-PR gateways na počet otevřených PR.
+
 ### Další pole
 `workflows` (+ `limits.steps`), `durableObjects` (SQLite), `crons`, `vars`/`varsByEnv` (per-worker
 per-env override — řeší env-reset past), `externalServices` (worker mimo topologii, literální jméno
@@ -222,8 +249,9 @@ import {
 
 ## Stav
 
-`0.6.1` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
+`0.7.0` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
 (14 workerů, plný dbu-txs clone) + `examples/minimal-app` (single worker).
+- 0.7.0: AI Gateway (per-PR + shared, REST provisioning), `ai` binding, gateway var injection.
 - 0.6.x: suffix naming mode, domain šablony (`{pr}`), queue consumer config, `migrateCommand`
   (drizzle), `vpcServices`, workflow `limits`, `observability`, `version_metadata`, `workersDev`,
   workflow šablony v `templates/`.

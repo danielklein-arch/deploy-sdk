@@ -19,6 +19,10 @@ export type QueueConsumer = {
   deadLetter?: { resource: string; maxRetries: number }
 }
 export type R2Binding = { binding: string; resource: string } // resource = base name bucketu
+// AI Gateway: NEMÁ wrangler config binding — worker gateway referencuje runtime podle id
+// (env.AI.run(..., { gateway: { id } }) / fetch na gateway.ai.cloudflare.com).
+// `binding` = jméno VAR, do které render injektne resolved jméno gatewaye.
+export type AiGatewayBinding = { binding: string; resource: string } // resource = base name gatewaye
 export type SecretStoreBinding = { binding: string; secretName: string } // secretName = jméno v CF Secrets Store
 export type DurableObjectBinding = { binding: string; className: string } // className = exportovaná DO třída
 // limits.steps: per-workflow override (dbu-txs bank sync = 25000)
@@ -41,6 +45,10 @@ export type WorkerDescriptor = {
   d1?: D1Binding[]
   kv?: KvBinding[]
   r2?: R2Binding[]
+  // Workers AI binding → wrangler `ai = { binding }` (CF limit: max 1 na worker)
+  ai?: { binding: string }
+  // Resolved jméno AI Gateway jako var (gateway nemá config binding — runtime reference by id)
+  aiGateways?: AiGatewayBinding[]
   secretsStore?: SecretStoreBinding[] // bind na centrální CF Secrets Store (topology.secretsStoreId)
   durableObjects?: DurableObjectBinding[] // DO třídy exportované tímto workerem (+ SQLite migrace)
   workflows?: WorkflowBinding[] // Workflow třídy (cloud-side identita → cleanup je maže)
@@ -79,6 +87,11 @@ export type Topology = {
   // Sdílené R2 buckety: preview kolabuje na 1 (`preview-${r}`), stable per-env (`dev-`/`staging-`/`prod-`).
   // NEteardownují se na PR close (persistují). Vhodné pro dokumenty s public custom domain.
   sharedR2Resources?: readonly string[]
+  // AI Gateways (provisioning přes CF REST API — wrangler příkaz neexistuje). Per-PR, teardown na PR close.
+  // Id constraint: jen [a-z0-9-], max 64 znaků vč. prefixu/suffixu — hlídá lint.
+  aiGatewayResources?: readonly string[]
+  // Sdílené AI Gateways: preview kolabuje na `preview-${r}`, stable per-env. NEteardownují se.
+  sharedAiGatewayResources?: readonly string[]
   previewZone: string // zóna pro per-PR custom domény (gateway)
   secretsStoreId: string // CF Secrets Store id (account-specific)
   // Suffix naming mode (dbu-txs): jména = `${naming.prefix}${base}${suffix}` — preview `dbu-txs-order-1577`,

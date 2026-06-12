@@ -12,6 +12,7 @@ import {
   kvList,
   queueNames,
   r2Names,
+  aiGatewayList,
   consoleLogger,
   type CfCtx,
   type Logger,
@@ -27,12 +28,16 @@ export type GcResult = {
 
 // Posbírá PR čísla ze VŠECH existujících per-PR zdrojů (napříč typy).
 async function enumeratePrNumbers(topology: Topology, ctx: CfCtx): Promise<Set<number>> {
+  // AI Gateway list jen když je topologie používá — neforcovat 'AI Gateway Read' token scope na ostatní.
+  const hasAig =
+    (topology.aiGatewayResources?.length ?? 0) + (topology.sharedAiGatewayResources?.length ?? 0) > 0
   const names = [
     ...(await workersList(ctx)),
     ...(await d1List()).map((d) => d.name),
     ...(await kvList()).map((n) => n.title),
     ...(await queueNames()),
     ...(await r2Names()),
+    ...(hasAig ? await aiGatewayList(ctx) : []),
   ]
   const prNums = new Set<number>()
   for (const n of names) {

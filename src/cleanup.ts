@@ -11,6 +11,7 @@ import {
   deleteWorker,
   deleteWorkflow,
   deleteQueue,
+  deleteAiGateway,
   deleteR2Object,
   deleteR2Bucket,
   deleteD1,
@@ -70,6 +71,10 @@ export async function cleanupEnv(
       await tryRun(`workflow ${name(wf.name)}`, () => deleteWorkflow(name(wf.name)))
 
   for (const r of queueResources) await tryRun(`queue ${name(r)}`, () => deleteQueue(name(r)))
+
+  // AI Gateways — REST delete. Jen per-PR; sharedAiGatewayResources ZÁMĚRNĚ persistují (jako shared R2).
+  for (const r of topology.aiGatewayResources ?? [])
+    await tryRun(`ai-gateway ${name(r)}`, () => deleteAiGateway(name(r), ctx))
 
   // R2 — bucket nejde smazat neprázdný → nejdřív objekty (list přes CF API), pak bucket.
   // POZN.: jen per-PR `r2Resources`. `sharedR2Resources` se ZÁMĚRNĚ neteardownují (persistují přes PR).

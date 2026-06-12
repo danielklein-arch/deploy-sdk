@@ -2,7 +2,7 @@
 // Čistá funkce (žádné process.env). env (DeployEnv) řídí jména/domény/vars/secrets per prostředí.
 import type { Topology, WorkerDescriptor, DeployEnv } from './types'
 import type { Ids } from './cf-client'
-import { nameFor, resolveDomain } from './env'
+import { nameFor, sharedNameFor, aiGatewayName, resolveDomain } from './env'
 
 const PREVIEW_DIR = '.preview'
 
@@ -11,6 +11,8 @@ const PREVIEW_DIR = '.preview'
 export function computeVars(w: WorkerDescriptor, env: DeployEnv, topology: Topology): Record<string, string> {
   const vars: Record<string, string> = { ...env.vars, ...w.vars, ...(w.varsByEnv?.[env.key] ?? {}) }
   if (w.injectUrlOf) vars[w.injectUrlOf.var] = `https://${resolveDomain(env, w.injectUrlOf.worker, topology)}`
+  // Resolved jméno AI Gateway (gateway nemá config binding → runtime reference přes var). Vyhrává nad vars.
+  for (const g of w.aiGateways ?? []) vars[g.binding] = aiGatewayName(env, g.resource, topology)
   return vars
 }
 
@@ -23,7 +25,7 @@ export async function renderConfig(w: WorkerDescriptor, { env, ids, topology }: 
   const sharedR2 = new Set(topology.sharedR2Resources ?? [])
   // Shared bucket: preview všech PR sdílí `preview-${r}`; stable = per-env jméno. Non-shared = per-env/PR jméno.
   const bucketName = (resource: string): string =>
-    sharedR2.has(resource) ? (env.ephemeral ? `preview-${resource}` : name(resource)) : name(resource)
+    sharedR2.has(resource) ? sharedNameFor(env, resource) : name(resource)
   const cfg: Record<string, unknown> = {
     name: name(w.base),
     // build worker → entry = built output (např. .output/server/index.mjs), jinak src. Cesta relativní k .preview/.
@@ -59,6 +61,7 @@ export async function renderConfig(w: WorkerDescriptor, { env, ids, topology }: 
     }))
   if (w.kv?.length) cfg.kv_namespaces = w.kv.map((k) => ({ binding: k.binding, id: ids.kv[k.resource] }))
   if (w.r2?.length) cfg.r2_buckets = w.r2.map((b) => ({ binding: b.binding, bucket_name: bucketName(b.resource) }))
+  if (w.ai) cfg.ai = { binding: w.ai.binding }
   if (w.secretsStore?.length)
     cfg.secrets_store_secrets = w.secretsStore.map((s) => ({
       binding: s.binding,

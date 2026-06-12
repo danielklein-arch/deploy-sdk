@@ -315,3 +315,92 @@ test('parsePr: legacy prefix vs naming suffix mode', async () => {
   expect(parsePr('dbu-txs-order', namedTopology)).toBe(null) // production bare
   expect(parsePr('other-project-55', namedTopology)).toBe(null) // cizí prefix
 })
+
+// ── 0.7.0: AI Gateway (per-PR + shared) + ai binding ─────────────────────────
+
+const aiWorker: WorkerDescriptor = {
+  base: 'llm-service',
+  dir: 'services/llm',
+  main: 'src/index.ts',
+  vars: { COMMON: 'x' },
+  ai: { binding: 'AI' },
+  aiGateways: [
+    { binding: 'AI_GATEWAY_ID', resource: 'ai' },
+    { binding: 'AI_GATEWAY_SHARED_ID', resource: 'ai-shared' },
+  ],
+  deployOrder: 0,
+}
+
+const aiTopology: Topology = {
+  ...topology,
+  workers: [aiWorker],
+  aiGatewayResources: ['ai'],
+  sharedAiGatewayResources: ['ai-shared'],
+}
+
+test('render: ai binding → cfg.ai, gateway vars per-PR vs shared (preview)', async () => {
+  const env = resolveEnv(aiTopology, { preview: 7 })
+  const cfg = await read(await renderConfig(aiWorker, opts(env, aiTopology)))
+  expect(cfg.ai).toEqual({ binding: 'AI' })
+  expect(cfg.vars.AI_GATEWAY_ID).toBe('pr-7-ai') // per-PR
+  expect(cfg.vars.AI_GATEWAY_SHARED_ID).toBe('preview-ai-shared') // shared kolaps
+  expect(cfg.vars.COMMON).toBe('x') // ostatní vars nedotčené
+})
+
+test('render prod: gateway vars per-env, shared bez kolapsu', async () => {
+  const env = resolveEnv(aiTopology, { stable: 'prod' })
+  const cfg = await read(await renderConfig(aiWorker, opts(env, aiTopology)))
+  expect(cfg.vars.AI_GATEWAY_ID).toBe('prod-ai')
+  expect(cfg.vars.AI_GATEWAY_SHARED_ID).toBe('prod-ai-shared')
+})
+
+test('naming mode: gateway var dbu-txs-ai-<pr>', async () => {
+  const t: Topology = { ...namedTopology, workers: [aiWorker], aiGatewayResources: ['ai', 'ai-shared'] }
+  const cfg = await read(await renderConfig(aiWorker, opts(resolveEnv(t, { preview: 7 }), t)))
+  expect(cfg.vars.AI_GATEWAY_ID).toBe('dbu-txs-ai-7')
+})
+
+test('vars kolize s aiGateways bindingem: gateway hodnota vyhraje', async () => {
+  const w: WorkerDescriptor = {
+    ...aiWorker,
+    vars: { AI_GATEWAY_ID: 'manual-override' },
+  }
+  const t = { ...aiTopology, workers: [w] }
+  const cfg = await read(await renderConfig(w, opts(resolveEnv(t, { preview: 7 }), t)))
+  expect(cfg.vars.AI_GATEWAY_ID).toBe('pr-7-ai')
+})
+
+test('lint: ai-gateway v obou listech → warning', () => {
+  const t: Topology = { ...topology, workers: [], aiGatewayResources: ['ai'], sharedAiGatewayResources: ['ai'] }
+  expect(lintTopology(t).some((w) => w.includes("ai-gateway 'ai'") && w.includes('vyber jen jeden'))).toBe(true)
+})
+
+test('lint: aiGateways binding na neregistrovaný resource → warning', () => {
+  const t: Topology = {
+    ...topology,
+    workers: [{ ...aiWorker, aiGateways: [{ binding: 'GW', resource: 'missing' }] }],
+  }
+  expect(lintTopology(t).some((w) => w.includes("'missing'") && w.includes('není v aiGatewayResources'))).toBe(true)
+})
+
+test('lint: gateway id charset + délka přes 64 znaků → warnings', () => {
+  const long = 'a'.repeat(70)
+  const t: Topology = { ...topology, workers: [], aiGatewayResources: ['ai_gw', long] }
+  const warnings = lintTopology(t)
+  expect(warnings.some((w) => w.includes("'ai_gw'") && w.includes('[a-z0-9-]'))).toBe(true)
+  expect(warnings.some((w) => w.includes(long) && w.includes('64'))).toBe(true)
+})
+
+test('lint: var kolize s aiGateways bindingem → warning', () => {
+  const t: Topology = {
+    ...aiTopology,
+    workers: [{ ...aiWorker, vars: { AI_GATEWAY_ID: 'x' } }],
+  }
+  expect(lintTopology(t).some((w) => w.includes("var 'AI_GATEWAY_ID'") && w.includes('vyhraje'))).toBe(true)
+})
+
+test('parsePr: shared gateway preview-* není orphan (oba mody)', async () => {
+  const { parsePr } = await import('./prefix')
+  expect(parsePr('preview-ai', topology)).toBe(null)
+  expect(parsePr('preview-ai', namedTopology)).toBe(null)
+})

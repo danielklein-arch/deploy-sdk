@@ -8,6 +8,7 @@ export type {
   D1Binding,
   KvBinding,
   R2Binding,
+  AiGatewayBinding,
   QueueProducer,
   QueueConsumer,
   SecretStoreBinding,
@@ -20,7 +21,7 @@ export type {
 
 export { provision, deployOne, migrateOne, prefixFor, parsePrefix, entrypointInfo } from './engine'
 export { parsePr } from './prefix'
-export { resolveEnv, resolveDomain, nameFor, type EnvSelector } from './env'
+export { resolveEnv, resolveDomain, nameFor, sharedNameFor, aiGatewayName, type EnvSelector } from './env'
 export { cleanupEnv, type CleanupResult, type CleanupCtx } from './cleanup'
 export { gc, type GcOpts, type GcResult } from './gc'
 export { renderConfig, type RenderOpts } from './render-config'

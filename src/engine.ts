@@ -7,32 +7,44 @@ import {
   ensureKv,
   ensureQueue,
   ensureR2,
+  ensureAiGateway,
   applyD1Migrations,
   hasSqlMigrations,
   deployWorker,
   consoleLogger,
+  type CfCtx,
   type Logger,
   type Ids,
 } from './cf-client'
 import { computeVars, renderConfig } from './render-config'
-import { nameFor, resolveDomain } from './env'
+import { nameFor, sharedNameFor, resolveDomain } from './env'
 
 export { prefixFor, parsePrefix } from './prefix'
 
 // Vytvoří/reusne všechny sdílené zdroje pro env (idempotentní). Volat JEDNOU před deployem workerů.
+// ctx (CF REST API) je potřeba jen pro AI Gateways — topologie bez nich běží bez něj.
 export async function provision(
   topology: Topology,
   env: DeployEnv,
-  log: Logger = consoleLogger,
+  opts: { ctx?: CfCtx; log?: Logger } = {},
 ): Promise<Ids> {
+  const { ctx, log = consoleLogger } = opts
   const ids: Ids = { d1: {}, kv: {} }
   for (const r of topology.d1Resources) ids.d1[r] = await ensureD1(nameFor(env, r), log)
   for (const r of topology.kvResources) ids.kv[r] = await ensureKv(nameFor(env, r), log)
   for (const r of topology.queueResources) await ensureQueue(nameFor(env, r), log)
   for (const r of topology.r2Resources) await ensureR2(nameFor(env, r), log)
   // Shared buckety: preview kolabuje na `preview-${r}` (1 pro všechny PR), stable per-env. Persistují.
-  for (const r of topology.sharedR2Resources ?? [])
-    await ensureR2(env.ephemeral ? `preview-${r}` : nameFor(env, r), log)
+  for (const r of topology.sharedR2Resources ?? []) await ensureR2(sharedNameFor(env, r), log)
+  // AI Gateways — jen REST API → vyžadují ctx. Shared kolabují stejně jako shared R2.
+  const aig = [
+    ...(topology.aiGatewayResources ?? []).map((r) => nameFor(env, r)),
+    ...(topology.sharedAiGatewayResources ?? []).map((r) => sharedNameFor(env, r)),
+  ]
+  if (aig.length) {
+    if (!ctx) throw new Error('[provision] aiGateway resources vyžadují ctx (CF REST API)')
+    for (const n of aig) await ensureAiGateway(n, ctx, log)
+  }
   return ids
 }
 

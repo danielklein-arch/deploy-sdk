@@ -159,11 +159,21 @@ export async function deployWorker(
 
 export type CfCtx = { accountId: string; apiToken: string }
 
-async function cfApi<T>(ctx: CfCtx, path: string): Promise<{ success: boolean; result?: T }> {
+async function cfApi<T>(
+  ctx: CfCtx,
+  path: string,
+  init: { method?: string; body?: unknown } = {},
+): Promise<{ success: boolean; result?: T; errors?: Array<{ code: number; message: string }>; status: number }> {
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${ctx.accountId}${path}`, {
-    headers: { Authorization: `Bearer ${ctx.apiToken}` },
+    method: init.method ?? 'GET',
+    headers: {
+      Authorization: `Bearer ${ctx.apiToken}`,
+      ...(init.body !== undefined && { 'Content-Type': 'application/json' }),
+    },
+    ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
   })
-  return (await res.json()) as { success: boolean; result?: T }
+  const j = (await res.json()) as { success: boolean; result?: T; errors?: Array<{ code: number; message: string }> }
+  return { ...j, status: res.status }
 }
 
 // Všechny worker scripty v účtu (wrangler nemá list scripts) → names.
@@ -175,6 +185,46 @@ export async function workersList(ctx: CfCtx): Promise<string[]> {
 export async function r2ObjectKeys(bucket: string, ctx: CfCtx): Promise<string[]> {
   const j = await cfApi<Array<{ key: string }>>(ctx, `/r2/buckets/${bucket}/objects`)
   return j.success ? (j.result ?? []).map((o) => o.key) : []
+}
+
+// ── AI Gateway (jen REST API — wrangler příkaz neexistuje) ───────────────────
+
+// Create-body defaulty: cache vypnutá (ttl 0), logy zapnuté, rate limiting vypnutý (0/0).
+// Všechna pole jsou v create API required. Exportováno kvůli testu.
+export const aiGatewayCreateBody = (id: string) => ({
+  id,
+  cache_invalidate_on_update: true,
+  cache_ttl: 0, // 0 = cache off
+  collect_logs: true,
+  rate_limiting_interval: 0, // 0 = rate limiting off
+  rate_limiting_limit: 0,
+})
+
+export async function aiGatewayList(ctx: CfCtx): Promise<string[]> {
+  const names: string[] = []
+  for (let page = 1; ; page++) {
+    const j = await cfApi<Array<{ id: string }>>(ctx, `/ai-gateway/gateways?page=${page}&per_page=50`)
+    assert(j.success, `ai-gateway list selhal: ${JSON.stringify(j.errors)}`)
+    const batch = (j.result ?? []).map((g) => g.id)
+    names.push(...batch)
+    if (batch.length < 50) return names
+  }
+}
+
+export async function ensureAiGateway(name: string, ctx: CfCtx, log: Logger = consoleLogger): Promise<void> {
+  if ((await aiGatewayList(ctx)).includes(name)) {
+    log.info(`[ai-gateway] reuse ${name}`)
+    return
+  }
+  log.info(`[ai-gateway] create ${name}`)
+  const j = await cfApi(ctx, '/ai-gateway/gateways', { method: 'POST', body: aiGatewayCreateBody(name) })
+  assert(j.success, `ai-gateway create ${name} selhal: ${JSON.stringify(j.errors)}`)
+}
+
+export async function deleteAiGateway(name: string, ctx: CfCtx): Promise<void> {
+  const j = await cfApi(ctx, `/ai-gateway/gateways/${name}`, { method: 'DELETE' })
+  if (j.success || j.status === 404) return // 404 = už neexistuje = success
+  throw new Error(`[cf-client] ai-gateway delete ${name} selhal: ${JSON.stringify(j.errors)}`)
 }
 
 // ── Delete wrappery (best-effort orchestruje cleanup.ts) ─────────────────────
