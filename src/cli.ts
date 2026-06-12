@@ -78,6 +78,12 @@ function requireAccount(): string {
   return process.env.CLOUDFLARE_ACCOUNT_ID ?? fail('CLOUDFLARE_ACCOUNT_ID env required')
 }
 
+// CfCtx pro REST cally — nese i source tokenu (OAuth fallback → provision fail-fast u aig/access).
+async function restCtx(accountId: string) {
+  const { token, source } = await resolveCfToken()
+  return { accountId, apiToken: token, oauthFallback: source === 'oauth' }
+}
+
 function parseIds(): Ids {
   const raw = values.ids ?? process.env.PREVIEW_IDS ?? fail('PREVIEW_IDS env nebo --ids required')
   try {
@@ -118,7 +124,7 @@ switch (cmd) {
     warnLint(topology)
     const env = resolveDeployEnv(topology) // aktivuje per-env account/token
     const accountId = requireAccount()
-    const ids = await provision(topology, env, { ctx: { accountId, apiToken: await resolveCfToken() } })
+    const ids = await provision(topology, env, { ctx: await restCtx(accountId) })
     const ep = entrypointInfo(topology, env)
     emit(
       `ids=${JSON.stringify(ids)}\n` +
@@ -158,7 +164,7 @@ switch (cmd) {
     const topology = await loadTopology(topoPath)
     const env = resolveDeployEnv(topology) // aktivuje per-env account/token
     const accountId = requireAccount()
-    const { failures } = await cleanupEnv(env, topology, { accountId, apiToken: await resolveCfToken() })
+    const { failures } = await cleanupEnv(env, topology, await restCtx(accountId))
     if (failures.length) {
       console.error(`\n[cleanup] ✗ ${failures.length} zdrojů se nepodařilo smazat:`)
       for (const f of failures) console.error(`  - ${f}`)
@@ -178,7 +184,7 @@ switch (cmd) {
       .map((s) => s.trim())
       .filter(Boolean)
       .map(Number)
-    const res = await gc(topology, openPrNumbers, { accountId, apiToken: await resolveCfToken() }, { apply })
+    const res = await gc(topology, openPrNumbers, await restCtx(accountId), { apply })
     console.log(`[gc] pr-* prefixů: ${res.prefixes}, otevřených PR: ${res.open}, osiřelých: ${res.orphans.length}`)
     if (!res.orphans.length) console.log('[gc] nic ke smazání')
     else {
@@ -195,7 +201,7 @@ switch (cmd) {
     const env = resolveDeployEnv(topology) // aktivuje per-env account/token
     console.log(`[deploy-all] env ${env.name} → prefix ${env.prefix}`)
     const accountId = requireAccount()
-    const ids = await provision(topology, env, { ctx: { accountId, apiToken: await resolveCfToken() } })
+    const ids = await provision(topology, env, { ctx: await restCtx(accountId) })
     const ordered = [...topology.workers].sort((a, b) => a.deployOrder - b.deployOrder)
     const urls: Record<string, string> = {}
     for (const w of ordered) urls[w.base] = await deployOne(w, topology, env, { ids })

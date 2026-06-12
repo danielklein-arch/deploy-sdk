@@ -269,7 +269,9 @@ bunx deploy-sdk deploy-all     # lokální: provision + seriový deploy všeho
 bunx deploy-sdk lint           # advisory kontrola topologie
 ```
 Env: `PR_NUMBER` (preview) | `STABLE_ENV` (stable), `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`,
-`-t/--topology` (default `./topology.ts`). Lokálně token fallne na wrangler OAuth.
+`-t/--topology` (default `./topology.ts`). Lokálně token fallne na wrangler OAuth — POZOR: OAuth
+token pokrývá jen wrangler operace; `aiGatewayResources`/`accessByEnv` REST endpointy ne (OAuth
+scope neexistuje) → provision fail-fastne s hintem; nastav `CLOUDFLARE_API_TOKEN`.
 
 ## Veřejné API (lib)
 
@@ -283,8 +285,9 @@ import {
 
 ## Stav
 
-`0.9.0` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
+`0.9.1` — referenční consumer: [`dbu-txs-preview-lab`](https://github.com/danielklein-arch/dbu-txs-preview-lab)
 (14 workerů, plný dbu-txs clone) + `examples/minimal-app` (single worker).
+- 0.9.1: OAuth fallback DX — fail-fast + scope hint (auth 10000) pro aig/access REST.
 - 0.9.0: `accessByEnv` — Cloudflare Access (ZT) apps přes REST: preview wildcard + stable,
   email/service-token policies, smoke `CF_ACCESS_*` env. Živě neověřeno (ZT org až na Develit účtu).
 - 0.8.0: `browser` binding (Browser Rendering), `cronsByEnv` (per-env cron gating), per-worker

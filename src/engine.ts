@@ -9,6 +9,7 @@ import {
   ensureR2,
   ensureAiGateway,
   ensureAccessApp,
+  SCOPE_HINT,
   applyD1Migrations,
   hasSqlMigrations,
   deployWorker,
@@ -30,6 +31,13 @@ export async function provision(
   opts: { ctx?: CfCtx; log?: Logger } = {},
 ): Promise<Ids> {
   const { ctx, log = consoleLogger } = opts
+  // Fail-fast PŘED prvním ensure: aiGateway/access jdou jen přes REST a wrangler OAuth token
+  // (lokální fallback) na ně scope nemá — ať to nespadne až v půlce provisionu.
+  const needsRest =
+    (topology.aiGatewayResources?.length ?? 0) + (topology.sharedAiGatewayResources?.length ?? 0) > 0 ||
+    topology.workers.some((w) => w.accessByEnv?.[env.key])
+  if (needsRest && ctx?.oauthFallback)
+    throw new Error(`[provision] aiGateway/access zdroje: ${SCOPE_HINT}`)
   const ids: Ids = { d1: {}, kv: {} }
   for (const r of topology.d1Resources) ids.d1[r] = await ensureD1(nameFor(env, r), log)
   for (const r of topology.kvResources) ids.kv[r] = await ensureKv(nameFor(env, r), log)

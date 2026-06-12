@@ -534,3 +534,29 @@ test('lint: accessByEnv s {pr} šablonou a policy → bez access warningů', () 
   }
   expect(lintTopology(t).some((w) => w.includes('accessByEnv'))).toBe(false)
 })
+
+test('provision fail-fast: aig/access zdroje + OAuth fallback token → throw před ensure', async () => {
+  const { provision } = await import('./engine')
+  const ctx = { accountId: 'a', apiToken: 't', oauthFallback: true }
+  const aig: Topology = { ...topology, r2Resources: [], sharedR2Resources: [], aiGatewayResources: ['ai'], workers: [] }
+  expect(provision(aig, resolveEnv(aig, { preview: 1 }), { ctx })).rejects.toThrow('scope')
+  const access: Topology = {
+    ...topology,
+    r2Resources: [],
+    sharedR2Resources: [],
+    workers: [
+      {
+        base: 'fe',
+        dir: 'fe',
+        main: 'i.ts',
+        accessByEnv: { preview: { emailDomains: ['develit.io'] } },
+        domainsByEnv: { preview: '{pr}.x.dev' },
+        deployOrder: 0,
+      },
+    ],
+  }
+  expect(provision(access, resolveEnv(access, { preview: 1 }), { ctx })).rejects.toThrow('scope')
+  // env bez access klíče (stable) ani gateways → fail-fast se NEaktivuje (proběhne normálně, prázdné zdroje)
+  const plain: Topology = { ...access, workers: [{ ...access.workers[0]!, accessByEnv: undefined }], kvResources: [] }
+  await provision(plain, resolveEnv(plain, { stable: 'prod' }), { ctx })
+})

@@ -157,7 +157,16 @@ export async function deployWorker(
 // Pozn.: resolve tokenu (čte process.env / wrangler config) žije v entry-side scripts/cf-token.ts,
 // ne tady — lib zůstává bez process.env (package purity). Token se předává přes CfCtx.
 
-export type CfCtx = { accountId: string; apiToken: string }
+// oauthFallback: token přišel z wrangler OAuth configu (lokální fallback) — NEpokrývá
+// ai-gateway/access REST (OAuth scope neexistuje) → provision fail-fastuje před prvním callem.
+export type CfCtx = { accountId: string; apiToken: string; oauthFallback?: boolean }
+
+// Auth error 10000 = token bez potřebného scope → actionable hint místo kryptického kódu.
+export const SCOPE_HINT =
+  'token nemá potřebný scope — wrangler OAuth fallback ai-gateway/access REST neumí (scope neexistuje); ' +
+  'nastav CLOUDFLARE_API_TOKEN se scope `AI Gateway Edit` / `Access: Apps and Policies Write`'
+const fmtErrors = (errors?: Array<{ code: number; message: string }>): string =>
+  JSON.stringify(errors) + (errors?.some((e) => e.code === 10000) ? ` → ${SCOPE_HINT}` : '')
 
 async function cfApi<T>(
   ctx: CfCtx,
@@ -204,7 +213,7 @@ export async function aiGatewayList(ctx: CfCtx): Promise<string[]> {
   const names: string[] = []
   for (let page = 1; ; page++) {
     const j = await cfApi<Array<{ id: string }>>(ctx, `/ai-gateway/gateways?page=${page}&per_page=50`)
-    assert(j.success, `ai-gateway list selhal: ${JSON.stringify(j.errors)}`)
+    assert(j.success, `ai-gateway list selhal: ${fmtErrors(j.errors)}`)
     const batch = (j.result ?? []).map((g) => g.id)
     names.push(...batch)
     if (batch.length < 50) return names
@@ -218,13 +227,13 @@ export async function ensureAiGateway(name: string, ctx: CfCtx, log: Logger = co
   }
   log.info(`[ai-gateway] create ${name}`)
   const j = await cfApi(ctx, '/ai-gateway/gateways', { method: 'POST', body: aiGatewayCreateBody(name) })
-  assert(j.success, `ai-gateway create ${name} selhal: ${JSON.stringify(j.errors)}`)
+  assert(j.success, `ai-gateway create ${name} selhal: ${fmtErrors(j.errors)}`)
 }
 
 export async function deleteAiGateway(name: string, ctx: CfCtx): Promise<void> {
   const j = await cfApi(ctx, `/ai-gateway/gateways/${name}`, { method: 'DELETE' })
   if (j.success || j.status === 404) return // 404 = už neexistuje = success
-  throw new Error(`[cf-client] ai-gateway delete ${name} selhal: ${JSON.stringify(j.errors)}`)
+  throw new Error(`[cf-client] ai-gateway delete ${name} selhal: ${fmtErrors(j.errors)}`)
 }
 
 // ── Access apps (Zero Trust; jen REST API — wrangler příkaz neexistuje) ──────
@@ -264,7 +273,7 @@ export async function accessAppDomains(ctx: CfCtx): Promise<string[]> {
   const domains: string[] = []
   for (let page = 1; ; page++) {
     const j = await cfApi<Array<{ domain?: string }>>(ctx, `/access/apps?page=${page}&per_page=50`)
-    assert(j.success, `access apps list selhal: ${JSON.stringify(j.errors)}`)
+    assert(j.success, `access apps list selhal: ${fmtErrors(j.errors)}`)
     const batch = (j.result ?? []).map((a) => a.domain).filter((d): d is string => !!d)
     domains.push(...batch)
     if ((j.result ?? []).length < 50) return domains
@@ -284,7 +293,7 @@ export async function ensureAccessApp(
   }
   log.info(`[access] create app ${domain}`)
   const j = await cfApi(ctx, '/access/apps', { method: 'POST', body: accessAppCreateBody(domain, policy) })
-  assert(j.success, `access app create ${domain} selhal: ${JSON.stringify(j.errors)}`)
+  assert(j.success, `access app create ${domain} selhal: ${fmtErrors(j.errors)}`)
 }
 
 // ── Delete wrappery (best-effort orchestruje cleanup.ts) ─────────────────────
