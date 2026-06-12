@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    secrets: inherit
+    secrets: inherit # cross-org consumer misto inherit preda CLOUDFLARE_* explicitne (viz workflow header)
     # with:
     #   env-passthrough: MY_SECRET_VAR1,MY_SECRET_VAR2
     #   smoke-script: scripts/smoke.sh

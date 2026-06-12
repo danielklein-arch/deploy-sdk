@@ -13,9 +13,15 @@ name: deploy-sdk preview
 #   jobs:
 #     preview:
 #       uses: danielklein-arch/deploy-sdk/.github/workflows/preview.yaml@v1
-#       secrets: inherit
+#       secrets: inherit   # same-org consumer; cross-org musi predat secrets explicitne (viz nize)
 #       with:
 #         env-passthrough: NUXT_ADMIN_MAIL,NUXT_NODEMAILER_AUTH_PASS
+#
+# Cross-org consumer (inherit GH nepodporuje mimo org) preda explicitne:
+#       secrets:
+#         CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+#         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+#         ENV_PASSTHROUGH_JSON: ${{ toJSON(secrets) }}   # jen pokud pouziva env-passthrough
 on:
   workflow_call:
     inputs:
@@ -24,6 +30,17 @@ on:
       # CSV jmen GH secrets, ktere se exportuji do env pred provision/deploy —
       # topology.ts je cte pres process.env (vars workeru). Hodnoty se maskuji.
       env-passthrough: { type: string, default: '' }
+    # TODO(develit-org): az se SDK presune pod develit-io, cross-org explicit predavani
+    # prestane byt potreba — consumeri se vrati na cisty `secrets: inherit`.
+    # Deklarace nevadi inherit consumerum (inherit required secrets splnuje).
+    secrets:
+      CLOUDFLARE_API_TOKEN: { required: true }
+      CLOUDFLARE_ACCOUNT_ID: { required: true }
+      CF_ACCESS_CLIENT_ID: { required: false }
+      CF_ACCESS_CLIENT_SECRET: { required: false }
+      # Cross-org nahrada inherit pro env-passthrough: caller posle cely svuj
+      # secrets kontext jako JSON (`${{ toJSON(secrets) }}`).
+      ENV_PASSTHROUGH_JSON: { required: false }
 
 jobs:
   # Stage 1: sdilene zdroje JEDNOU + emit matice workeru + entrypoint pro smoke/comment.
@@ -62,7 +79,7 @@ jobs:
       - name: Env passthrough (topology vars)
         if: inputs.env-passthrough != ''
         env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
+          SECRETS_JSON: ${{ secrets.ENV_PASSTHROUGH_JSON || toJSON(secrets) }}
           KEYS: ${{ inputs.env-passthrough }}
         run: |
           for k in ${KEYS//,/ }; do
@@ -106,7 +123,7 @@ jobs:
       - name: Env passthrough (topology vars)
         if: inputs.env-passthrough != ''
         env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
+          SECRETS_JSON: ${{ secrets.ENV_PASSTHROUGH_JSON || toJSON(secrets) }}
           KEYS: ${{ inputs.env-passthrough }}
         run: |
           for k in ${KEYS//,/ }; do

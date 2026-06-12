@@ -19,14 +19,14 @@ jobs:
       actions: read # nx-set-shas na push eventech potrebuje Actions API
     with:
       affected: true
-    secrets: inherit
+    secrets: inherit # cross-org consumer misto inherit preda CLOUDFLARE_* explicitne (viz workflow header)
 
   deploy:
     needs: ci
     uses: danielklein-arch/deploy-sdk/.github/workflows/deploy-stable.yaml@v1
     permissions:
       contents: read
-    secrets: inherit
+    secrets: inherit # cross-org consumer misto inherit preda CLOUDFLARE_* explicitne (viz workflow header)
     # with:
     #   env-passthrough: MY_SECRET_VAR1,MY_SECRET_VAR2
     #   skip-migrate: true   # projekt bez D1
