@@ -21,7 +21,9 @@ name: deploy-sdk preview
 #       secrets:
 #         CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 #         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-#         ENV_PASSTHROUGH_JSON: ${{ toJSON(secrets) }}   # jen pokud pouziva env-passthrough
+#         # jen pokud pouziva env-passthrough — kompaktni 1-line JSON z konkretnich klicu;
+#         # NE toJSON(secrets): viceradkovy secret rozbije redakci GH job outputs (skip output)
+#         ENV_PASSTHROUGH_JSON: '{"NUXT_ADMIN_MAIL":"${{ secrets.NUXT_ADMIN_MAIL }}"}'
 on:
   workflow_call:
     inputs:
@@ -38,8 +40,8 @@ on:
       CLOUDFLARE_ACCOUNT_ID: { required: true }
       CF_ACCESS_CLIENT_ID: { required: false }
       CF_ACCESS_CLIENT_SECRET: { required: false }
-      # Cross-org nahrada inherit pro env-passthrough: caller posle cely svuj
-      # secrets kontext jako JSON (`${{ toJSON(secrets) }}`).
+      # Cross-org nahrada inherit pro env-passthrough: caller posle kompaktni 1-line
+      # JSON z konkretnich klicu (viz header) — NE toJSON(secrets), rozbiji job outputs.
       ENV_PASSTHROUGH_JSON: { required: false }
 
 jobs:
