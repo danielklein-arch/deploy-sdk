@@ -1,0 +1,5 @@
+[install]
+# Supply-chain hardening: neinstaluj npm verze mladší než 3 dny (compromised-and-yanked guard).
+# Gatuje resolution (bun add/update), NE frozen CI install (empiricky ověřeno, Bun 1.3.12).
+# deploy-sdk není ci-sdk consumer → žádný lint to nevynucuje, je to vlastní hygiena.
+minimumReleaseAge = 259200
